@@ -1,6 +1,6 @@
 ---
 name: submit-learnings
-description: Push a personal learnings branch in a managed shared-skills repo and open a pull request for the single reviewer. Use when the user wants to submit their accumulated skill improvements, do the weekly learnings push, share their learnings branch, or gives a terse invocation like `$submit-learnings`. Rebases the learnings branch on the default branch, pushes it, and opens or updates one PR titled `learnings: ...`; it does not review or merge. Complements apply-conversation-lessons, which accumulates the commits.
+description: "Push a personal learnings branch in a managed shared-skills repo and open a pull request for the single reviewer. Use when the user wants to submit their accumulated skill improvements, do the weekly learnings push, share their learnings branch, or gives a terse invocation like `$submit-learnings`. Rebases the learnings branch on the default branch, pushes it, and opens or updates one PR (title prefixed `learnings:`); it does not review or merge. Complements apply-conversation-lessons, which accumulates the commits."
 ---
 
 # Submit Learnings
