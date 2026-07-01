@@ -1,0 +1,13 @@
+# Managed shared skills repository
+#
+# This repository is the canonical, single-source-of-truth set of agent skills
+# for the SECQUOIA group. It is curated by a single reviewer through pull requests.
+#
+# Tools should treat every skill under skills/ as MANAGED:
+#   - Do not edit the default branch (main) in place.
+#   - apply-conversation-lessons must commit learnings on a personal branch
+#     (learnings/<user>) and leave push + PR review to the weekly cadence.
+#
+# See CONTRIBUTING.md for the full workflow.
+reviewer: bernalde
+cadence: weekly

@@ -1,0 +1,29 @@
+# Maintainability Review Rubric
+
+Read this when judging whether the code a PR introduces or materially changes is well-structured, i.e. the "maintainability risks" part of the Review Standard. It is language- and repo-agnostic.
+
+## Three binding rules
+
+1. **The repo overrides.** A documented repository standard (`CONTRIBUTING`, style guide, linter config, established local pattern) always wins. Where the repo endorses something this rubric would flag, suppress the flag.
+2. **Always a judgement call.** Every item below is a labelled heuristic ("possible Feature Envy"), never a hard violation. Map it to `Nonblocking` (or `Question`) severity by default; escalate to `Blocking` only when the smell also causes a correctness, security, or serious maintainability problem covered by the Review Standard.
+3. **Skip what tooling enforces.** If a formatter, linter, or type checker already catches it, do not raise it in the review.
+
+Apply the rubric only to what the PR introduces or materially changes, not to pre-existing code it merely touches.
+
+## Smell baseline
+
+Each entry reads *what it is* → *how to fix*. Match against the changed hunks.
+
+- **Mysterious name** — a function, variable, or type whose name doesn't reveal what it does or holds. → rename it; if no honest name comes, the design is murky.
+- **Duplicated code** — the same logic shape appears in more than one hunk or file in the change. → extract the shared shape and call it from both.
+- **Long function / large change unit** — a unit doing too many things to hold in one's head. → decompose along the seams.
+- **Feature envy** — a method that reaches into another object's data more than its own. → move the method onto the data it envies.
+- **Data clumps** — the same few fields or parameters keep travelling together. → bundle them into one type and pass that.
+- **Primitive obsession** — a primitive or string standing in for a domain concept that deserves its own type. → give the concept its own small type.
+- **Repeated switches** — the same `switch`/`if`-cascade on the same type recurs across the change. → replace with polymorphism, or one shared map.
+- **Shotgun surgery** — one logical change forces scattered edits across many files. → gather what changes together into one module.
+- **Divergent change** — one file or module is edited for several unrelated reasons. → split so each module changes for one reason.
+- **Speculative generality** — abstraction, parameters, or hooks added for needs the spec doesn't have. → delete it; inline back until a real need appears.
+- **Message chains** — long `a.b().c().d()` navigation the caller shouldn't depend on. → hide the walk behind one method on the first object.
+- **Middle man** — a class or function that mostly just delegates onward. → cut it; call the real target directly.
+- **Refused bequest** — a subclass or implementer that ignores or overrides most of what it inherits. → drop the inheritance; use composition.

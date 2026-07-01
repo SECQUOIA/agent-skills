@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify Review Fixes"
+  short_description: "Verify PR comments were addressed"
+  default_prompt: "Use $gh-verify-review-resolution <PR-number-or-url> to check whether review comments were addressed without modifying anything."

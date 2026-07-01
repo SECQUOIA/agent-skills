@@ -1,0 +1,4 @@
+interface:
+  display_name: "Merge PR"
+  short_description: "Merge a verified GitHub PR"
+  default_prompt: "Use $gh-merge-pr to verify a pull request is green, merge it, and report follow-up issue status."

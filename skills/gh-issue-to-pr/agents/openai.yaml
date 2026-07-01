@@ -1,0 +1,4 @@
+interface:
+  display_name: "Issue to PR"
+  short_description: "Turn a GitHub issue into a PR"
+  default_prompt: "Use $gh-issue-to-pr to validate a GitHub issue, implement the smallest correct fix, push it, and open a pull request."

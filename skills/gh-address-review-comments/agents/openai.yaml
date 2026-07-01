@@ -1,0 +1,4 @@
+interface:
+  display_name: "Address PR Comments"
+  short_description: "Address unresolved PR feedback"
+  default_prompt: "Use $gh-address-review-comments <PR-number-or-url> to fix unresolved PR review comments."

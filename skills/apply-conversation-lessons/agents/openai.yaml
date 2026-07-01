@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apply Conversation Lessons"
+  short_description: "Update skills from conversation takeaways"
+  default_prompt: "Use $apply-conversation-lessons to capture lessons from this conversation and update the relevant existing skills."

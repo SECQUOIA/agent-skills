@@ -1,0 +1,4 @@
+interface:
+  display_name: "GH Workflow Conventions"
+  short_description: "Shared rules for the gh-* skills"
+  default_prompt: "Read $gh-workflow-conventions for the conventions shared across the gh-* GitHub workflow skills."
