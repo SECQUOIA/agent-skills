@@ -18,8 +18,12 @@ SRC="$REPO_DIR/skills"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 TARGETS=("$CODEX_HOME/skills" "$HOME/.claude/skills")
 
+RUN="$(date +%s)"
 for T in "${TARGETS[@]}"; do
   mkdir -p "$T"
+  # Back up any real (non-symlink) dirs OUTSIDE the skills dir, so a leftover
+  # copy can't be scanned as a duplicate-named skill.
+  BACKUP="$(dirname "$T")/$(basename "$T")-backup-$RUN"
   echo "Installing into $T ($MODE):"
   for S in "$SRC"/*/; do
     name="$(basename "$S")"
@@ -27,9 +31,9 @@ for T in "${TARGETS[@]}"; do
     if [ -L "$dest" ]; then
       rm "$dest"
     elif [ -e "$dest" ]; then
-      backup="$dest.bak.$(date +%s)"
-      mv "$dest" "$backup"
-      echo "  ! existing $name backed up to $(basename "$backup")"
+      mkdir -p "$BACKUP"
+      mv "$dest" "$BACKUP/$name"
+      echo "  ! existing $name moved to $BACKUP/"
     fi
     if [ "$MODE" = "copy" ]; then
       cp -R "$S" "$dest"
