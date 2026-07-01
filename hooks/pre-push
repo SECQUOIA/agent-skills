@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Managed skills repo guard: refuse direct pushes to the default branch.
+# Installed into .git/hooks/pre-push by install.sh.
+#
+# Changes must land through a reviewed PR (see CONTRIBUTING.md). Use a
+# learnings/<user> branch and $submit-learnings. Reviewers merge with
+# `gh pr merge`, which happens server-side and is unaffected by this hook.
+#
+# To override intentionally (rarely needed): git push --no-verify
+protected="refs/heads/main"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "$protected" ]; then
+    echo "" >&2
+    echo "pre-push: direct pushes to 'main' are blocked in this managed skills repo." >&2
+    echo "  Work on a learnings/<user> branch and open a PR (CONTRIBUTING.md), e.g. \$submit-learnings." >&2
+    echo "  Reviewers merge via 'gh pr merge' (server-side, unaffected)." >&2
+    echo "  To override intentionally: git push --no-verify" >&2
+    echo "" >&2
+    exit 1
+  fi
+done
+exit 0

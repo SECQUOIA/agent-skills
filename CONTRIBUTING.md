@@ -7,7 +7,7 @@ never silently diverge and merge conflicts stay rare and reviewable.
 
 ## The model
 
-- **`main` is protected and read-only for daily use.** You install it, you `git pull` it, you don't commit to it locally.
+- **`main` is read-only for daily use.** You install it, you `git pull` it, you don't commit to it locally. Because this repo is private on a free plan, GitHub branch protection isn't available, so `install.sh` installs a **pre-push hook** that blocks accidental `git push origin main`. Reviewer merges via `gh pr merge` (server-side) are unaffected; override intentionally with `git push --no-verify`.
 - **Each person works on a personal branch** named `learnings/<your-github-username>`.
 - **`apply-conversation-lessons` is managed-repo-aware.** In this repo (it detects the `.managed-skills` marker) it commits improvements to your personal branch, never to `main`, and never pushes on its own. It just accumulates.
 - **Weekly cadence:** after ~a week of use, push your branch and open a PR. The reviewer checks it with `gh-review-pr`, and merges with `gh-merge-pr`. Everyone then pulls the merged `main`.
