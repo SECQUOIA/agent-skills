@@ -31,6 +31,9 @@ git fetch origin
 git rebase origin/main
 
 # 2. Push your accumulated learnings and open a PR
+#    Easiest: run the skill, which does the rebase, push, and PR for you:
+#      $submit-learnings
+#    Or by hand:
 git push -u origin learnings/<your-github-username>
 gh pr create --base main --title "learnings: <short summary>" --fill
 ```

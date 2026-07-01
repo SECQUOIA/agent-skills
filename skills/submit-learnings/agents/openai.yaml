@@ -1,0 +1,4 @@
+interface:
+  display_name: "Submit Learnings"
+  short_description: "Push learnings branch and open a PR"
+  default_prompt: "Use $submit-learnings to rebase my learnings branch on the default branch, push it, and open a pull request for the reviewer."

@@ -50,7 +50,7 @@ In a managed repo, never edit the default branch in place and never push automat
 - Commit lessons on a personal working branch. If the working tree is on the default branch, create `learnings/<user>` from the current default branch first, then commit there with a clear message.
 - Accumulate lessons on that branch across sessions. Do not open or push a pull request on every invocation; the repo's cadence (for example a weekly push reviewed by a single reviewer) owns that step.
 - Before starting new edits, fetch and rebase the personal branch on the latest default branch so already-merged updates from others are incorporated and conflicts surface early. Keep each lesson small and self-contained to minimize cross-author merge conflicts.
-- When the user asks to submit accumulated learnings, hand off to the repo's PR workflow — branch → PR → single-reviewer review → merge (for example the `gh-issue-to-pr`, `gh-review-pr`, and `gh-merge-pr` skills) — so changes are serialized through review instead of colliding on the default branch.
+- When the user asks to submit accumulated learnings, hand off to the `submit-learnings` skill (it rebases on the default branch, pushes the personal branch, and opens one PR); the single reviewer then reviews with `gh-review-pr` and merges with `gh-merge-pr`. This serializes changes through review instead of colliding on the default branch.
 - Route a lesson that is genuinely personal and not meant for the shared set to a skill outside the managed repo, so the shared skills stay canonical.
 
 ## Final Response

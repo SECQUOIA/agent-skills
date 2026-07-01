@@ -16,7 +16,10 @@ This repository is the **single source of truth**. It is private and curated by 
 | `gh-julia-release` | Publish a Julia package release through the registry |
 | `gh-pages-deployment` | Investigate/manage GitHub Pages deployments |
 | `gh-workflow-conventions` | Shared conventions the `gh-*` skills reference (not run directly) |
-| `apply-conversation-lessons` | Fold lessons from a session back into the skills |
+| `apply-conversation-lessons` | Fold lessons from a session back into the skills (on your `learnings/<user>` branch) |
+| `submit-learnings` | Rebase, push your learnings branch, and open a PR for the reviewer |
+
+These skills chain into one issue → PR → merge pipeline — see [PIPELINE.md](PIPELINE.md).
 
 > **The skills reference each other by relative sibling paths** (e.g. every `gh-*`
 > skill reads `../gh-workflow-conventions/`). They must be installed **together**;
