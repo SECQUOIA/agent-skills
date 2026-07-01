@@ -44,6 +44,7 @@ A comment is `Blocking` when it carries the `Blocking` severity prefix posted by
 - Keep broader fixes within the PR's existing scope; record large or risky follow-ups instead of expanding the PR unilaterally.
 - Add or update tests when the comment identifies a bug, regression risk, or behavior that should be preserved.
 - For a bug, first add a reproducing test that fails on the current code, then make it pass.
+- When feedback adds benchmark, performance, or case-study coverage, run a small representative sweep when practical and summarize the observed behavior. If a required solver, license, dataset, or service is unavailable, report the exact blocker instead of inferring performance from wiring or smoke tests.
 - Update docs when behavior, usage, or public API expectations change.
 - Never make checks pass by deleting, skipping, or weakening tests/checks.
 
@@ -59,6 +60,8 @@ A comment is `Blocking` when it carries the `Blocking` severity prefix posted by
 ## GitHub Replies
 
 After pushing, record the pushed head SHA (`HEAD_SHA="$(git rev-parse HEAD)"`) and include target-specific hidden markers: `<!-- gh-arc:sha=<HEAD_SHA>:target=summary -->` in the top-level summary and `<!-- gh-arc:sha=<HEAD_SHA>:comment=<COMMENT_ID> -->` in each inline reply. Before posting, list existing top-level comments (`gh api repos/{owner}/{repo}/issues/{number}/comments --paginate`) and existing review comments (`gh api repos/{owner}/{repo}/pulls/{number}/comments --paginate`); skip only the summary or reply whose exact target-specific marker already exists. This makes partial-failure reruns idempotent without suppressing missing replies. (Shared conventions cover `-F body=@<file>` vs `-f body=...` and re-reading to confirm the posted body.)
+
+Do not treat earlier unmarked replies as satisfying the reply-idempotency requirement. For each unresolved inline thread, post a current-head marker-bearing reply unless that exact target-specific marker already exists, even when the code was already addressed by an earlier commit or the thread is outdated.
 
 1. Post one top-level PR comment with:
    - commits pushed
