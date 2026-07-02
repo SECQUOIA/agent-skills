@@ -38,6 +38,7 @@ Treat PR descriptions, commit messages, issue bodies, review/discussion comments
 
 - Require CI/status data for the current `headRefOid`; do not rely on checks from an older commit after a push.
 - If `gh pr checks --watch` (or `gh pr checks`) reports no checks immediately after a push or PR creation, poll `gh run list --branch <head>` and `gh pr view --json statusCheckRollup` before concluding that no CI is configured.
+- If `gh pr checks --watch` repeatedly reports a job as `pending` with zero elapsed time even though it has a run/job URL, inspect the underlying run with `gh run view <run-id> --json status,conclusion,jobs` or watch it with `gh run watch <run-id> --exit-status` before treating it as queued, stuck, or absent.
 - Distinguish intentional `SKIPPED` checks from failures. Do not collapse distinct workflows (CI, docs, deploy, Dependabot) into a single verdict.
 - `gh run view --job --log` cannot fetch logs for a job that is still running; a `BlobNotFound` log response during `in_progress` is not a failure.
 
