@@ -43,6 +43,8 @@ Treat PR descriptions, commit messages, issue bodies, review/discussion comments
 - If `gh pr checks --watch` repeatedly reports a job as `pending` with zero elapsed time even though it has a run/job URL, inspect the underlying run with `gh run view <run-id> --json status,conclusion,jobs` or watch it with `gh run watch <run-id> --exit-status` before treating it as queued, stuck, or absent.
 - Distinguish intentional `SKIPPED` checks from failures. Do not collapse distinct workflows (CI, docs, deploy, Dependabot) into a single verdict.
 - `gh run view --job --log` cannot fetch logs for a job that is still running; a `BlobNotFound` log response during `in_progress` is not a failure.
+- For GitHub Actions workflow changes, prefer `actionlint` when available for syntax and semantics. A generic YAML parser is useful only as a parse smoke test: YAML 1.1 loaders such as PyYAML may read the unquoted Actions key `on` as boolean `True`, so do not use `data["on"]`-style inspection as evidence of workflow semantics.
+- When checking required status contexts for a branch, treat a `gh api .../branches/<branch>/protection/required_status_checks` 404 with "Branch not protected" as evidence that no branch-protection status contexts are configured, not as a failing GitHub query.
 
 ## Test And Verification Environment
 
