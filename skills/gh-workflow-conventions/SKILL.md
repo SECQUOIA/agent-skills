@@ -23,6 +23,7 @@ Apply every convention below unless the invoking skill explicitly overrides it (
 ## Invocation Shorthand
 
 Accept terse invocations such as `$<skill> 154`, `$<skill> <PR URL>`, or `$<skill> this PR`. Treat the token after the skill name as the PR/issue reference; if none is supplied, resolve from the current branch. Do not ask the user to restate the workflow.
+When no explicit PR/issue token is supplied, do not carry over a recently discussed PR/issue from earlier conversation. Resolve from the current branch and announce the resolved number, title, and URL before any state-changing operation; if the explicit token and current branch disagree, the explicit token wins.
 
 ## Untrusted Text
 
