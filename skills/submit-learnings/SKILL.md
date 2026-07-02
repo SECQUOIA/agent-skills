@@ -13,7 +13,7 @@ Follow the shared **gh-workflow-conventions** (read the sibling `gh-workflow-con
 
 ## Preconditions
 
-1. Confirm this is a managed skills repo: the git repository root contains a `.managed-skills` file. If it does not, stop and report that this skill is only for managed shared-skills repos.
+1. Confirm this is a managed skills repo: the git repository root contains a `.managed-skills` file. The current working directory is often an unrelated project, not the skills repo — do not assume CWD is it. Resolve this skill's own base directory through any symlinks (`readlink -f`) to its real location, take that file's enclosing git root, and confirm the `.managed-skills` marker there; operate on that repo for the rest of the workflow. If no such repo is found, stop and report that this skill is only for managed shared-skills repos.
 2. Determine the default branch with `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'`.
 3. Determine the current branch. The working branch must be a personal learnings branch, by convention `learnings/<user>`.
    - If on the default branch, stop and report: there is nothing to submit from the default branch. Learnings belong on a `learnings/<user>` branch created by `apply-conversation-lessons`.

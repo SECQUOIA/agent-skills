@@ -29,6 +29,7 @@ This skill cannot run automatically at every conversation end. Use it when the u
    - Read each target skill completely before changing it.
    - If the target skill lives in a shared or managed repo, follow "Shared Or Managed Skill Repos" below before editing: commit on a personal branch, never the default branch.
    - Prefer durable user-owned skills under the agent's skills home: `$CODEX_HOME/skills` (or `~/.codex/skills`) for Codex, and `~/.claude/skills` for Claude. When a Claude skill is a symlink into `~/.codex/skills`, edit the real Codex file; that single source updates both agents. Do not edit plugin cache skills under `.codex/plugins/cache/` (or an equivalent Claude plugin cache) unless the user explicitly asks for that; cache edits may be overwritten.
+   - A single-source skill shared by both agents is read by Claude AND Codex, so keep the lesson's wording agent-neutral: describe the underlying tool/CLI behavior (`gh`, `git`, pytest, command-prefix permission matching) rather than one agent's specifics. Route a genuinely agent-specific lesson — for example Claude Code's `Bash(cmd:*)` allowlist syntax or a Codex-only setting — to that agent's own skills home instead of the shared file, or state it agent-neutrally if the concept applies to both.
    - If a lesson maps only to a plugin-cache skill, report it as an unimplemented candidate unless creating or updating a user-owned skill is clearly warranted.
    - If updating skills, follow the `skill-creator` principles when available: read it from its listed source locator, then keep changes concise with no auxiliary docs or references unless they are genuinely needed.
    - Add the lesson at the workflow point where a future agent would need it; avoid duplicating nearby rules.
@@ -36,7 +37,7 @@ This skill cannot run automatically at every conversation end. Use it when the u
    - Preserve frontmatter unless the trigger behavior itself changes. Update any sidecar agent metadata that is present (for example `agents/openai.yaml`) only when its user-facing metadata becomes stale.
 
 4. Validate.
-   - Run the skill validator for every changed skill when available.
+   - Run the skill validator for every changed skill when available. The validator ships with the `skill-creator` system skill, not with the edited skill's own repo: run `python <skill-creator>/scripts/quick_validate.py <skill-folder>` (e.g. `~/.codex/skills/.system/skill-creator/scripts/quick_validate.py` for Codex, or the equivalent under the Claude skills home). A skills repo shipping no validator of its own does NOT mean none is available — locate `skill-creator` before concluding validation is impossible.
    - If the validator script exists but is not executable, retry it with the appropriate interpreter such as `python <validator> <skill-folder>` before treating validation as unavailable.
    - If validation tooling is unavailable, at least inspect frontmatter, required fields, and Markdown structure.
    - Report any skill that could not be edited or validated.
@@ -48,6 +49,7 @@ Some skills are distributed through a shared repository that a single reviewer c
 In a managed repo, never edit the default branch in place and never push automatically:
 
 - Commit lessons on a personal working branch. If the working tree is on the default branch, create `learnings/<user>` from the current default branch first, then commit there with a clear message.
+- If the personal branch already has uncommitted skill changes, inspect them before editing. When they are valid accumulated lessons, validate and commit them before finalizing the pass (use separate commits when practical); when they are unrelated or ambiguous, leave them untouched and report that they must be resolved before `submit-learnings` can run.
 - Accumulate lessons on that branch across sessions. Do not open or push a pull request on every invocation; the repo's cadence (for example a weekly push reviewed by a single reviewer) owns that step.
 - Before starting new edits, fetch and rebase the personal branch on the latest default branch so already-merged updates from others are incorporated and conflicts surface early. Keep each lesson small and self-contained to minimize cross-author merge conflicts.
 - When the user asks to submit accumulated learnings, hand off to the `submit-learnings` skill (it rebases on the default branch, pushes the personal branch, and opens one PR); the single reviewer then reviews with `gh-review-pr` and merges with `gh-merge-pr`. This serializes changes through review instead of colliding on the default branch.
