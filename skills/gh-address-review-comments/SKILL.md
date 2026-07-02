@@ -46,6 +46,7 @@ A comment is `Blocking` when it carries the `Blocking` severity prefix posted by
 - For a bug, first add a reproducing test that fails on the current code, then make it pass.
 - When feedback adds benchmark, performance, or case-study coverage, run a small representative sweep when practical and summarize the observed behavior. If a required solver, license, dataset, or service is unavailable, report the exact blocker instead of inferring performance from wiring or smoke tests.
 - Update docs when behavior, usage, or public API expectations change.
+- When feedback flags stale source line references in docs, preserve traceability with stable citations: pin line ranges to the commit or artifact revision where they were verified when that revision is already part of the provenance, or drop bare line numbers and keep symbol names when no stable revision exists. Verify by searching for remaining moving `file:line` citations and by checking the pinned symbols or ranges resolve at the cited revision.
 - Never make checks pass by deleting, skipping, or weakening tests/checks.
 
 ## Verify, Commit, Push
