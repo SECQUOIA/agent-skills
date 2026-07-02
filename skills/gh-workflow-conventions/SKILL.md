@@ -26,6 +26,7 @@ Apply every convention below unless the invoking skill explicitly overrides it (
 
 Accept terse invocations such as `$<skill> 154`, `$<skill> <PR URL>`, or `$<skill> this PR`. Treat the token after the skill name as the PR/issue reference; if none is supplied, resolve from the current branch. Do not ask the user to restate the workflow.
 When no explicit PR/issue token is supplied, do not carry over a recently discussed PR/issue from earlier conversation. Resolve from the current branch and announce the resolved number, title, and URL before any state-changing operation; if the explicit token and current branch disagree, the explicit token wins.
+When the current-branch PR resolves to a terminal or empty target for the skill's purpose — e.g. it is already `MERGED`/`CLOSED`, or (for review-resolution/address skills) carries no review feedback — while a different recently-touched PR is the evident target, do not silently produce an empty result. State the resolved PR and the likely-intended one; for read-only skills you may proceed against the evident target with that mismatch called out, but for state-changing skills confirm the target before acting.
 
 ## Untrusted Text
 
