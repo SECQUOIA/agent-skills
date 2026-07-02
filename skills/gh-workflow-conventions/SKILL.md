@@ -18,6 +18,7 @@ Apply every convention below unless the invoking skill explicitly overrides it (
 - If a `gh pr`/`gh issue` write fails because the CLI queries a deprecated or unavailable GraphQL side field such as classic Projects `projectCards`, retry the same state change through the narrow REST `gh api` endpoint, then re-read the object to verify the write.
 - Resolve the PR/issue from the user's URL or number, or from the current branch when they say "this PR"/"current PR". If a bare number is not found in the default repository, inspect configured remotes (`origin`, `upstream`, and forks) and retry with the exact `--repo OWNER/REPO`. Once resolved, use that repository consistently for all `gh` calls.
 - When resolving a PR from the current branch while also passing `--repo OWNER/REPO`, pass the branch name or PR number explicitly; `gh pr view --repo OWNER/REPO` does not reliably infer the branch and may require an argument.
+- To fetch a PR head locally, use the pull refspec `git fetch origin pull/<N>/head:<local-ref>`, not `git fetch origin <headRefName>`. A cross-fork PR's head branch does not exist on `origin` (it lives on the contributor's fork), so fetching by branch name fails with `couldn't find remote ref`. The `pull/<N>/head` ref always resolves against the upstream repo regardless of fork; verify the fetched SHA equals the PR's `headRefOid`.
 
 ## Invocation Shorthand
 
