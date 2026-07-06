@@ -1,0 +1,4 @@
+interface:
+  display_name: "Triage Issue"
+  short_description: "Reproduce and enrich a bug issue before fixing"
+  default_prompt: "Use $gh-triage-issue <issue-number-or-url> to reproduce a reported bug, add a failing test and acceptance criteria, and post that evidence to the issue without fixing it."
