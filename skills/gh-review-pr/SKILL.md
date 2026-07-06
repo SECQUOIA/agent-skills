@@ -20,7 +20,8 @@ Follow the shared **gh-workflow-conventions** (read the sibling `gh-workflow-con
    - If the current user is the PR author, still complete the normal maintainer review checks, then plan to post COMMENT; GitHub rejects author APPROVE and REQUEST_CHANGES. Do not infer that another maintainer approval is required from authorship alone; state it as required only when live GitHub state reports a review gate such as `REVIEW_REQUIRED` or branch protection requiring approval.
    - If the PR is draft, plan to post COMMENT unless there are blocking findings. Note what remains before it can be formally approved or merged.
 5. Diff against the merge-base. Verify that the changed-file set from your local diff (`git diff --name-only $(git merge-base origin/<base> HEAD) HEAD`) equals `gh pr diff --name-only`; treat line totals as advisory only, since context and whitespace can differ. On a file-set mismatch, re-fetch base and head and recompute once. If the sets still differ, do not post a review — stop and report the discrepancy (the files present on only one side) so the base can be corrected.
-6. Review the PR head in a clean tree. If unrelated local artifacts make the shared checkout dirty, use a temporary worktree at the PR head for inspection and tests, then remove it before finishing. When running containerized validation against a temporary worktree, run the container as the host user or otherwise ensure generated files can be removed during cleanup. Flag only issues introduced or materially changed by this PR, not pre-existing code it merely touches.
+6. For first-time contributors or otherwise untrusted external contributors, complete a static safety pass before executing any contributor-controlled code. Inspect changed files and metadata for execution hooks, workflow changes, package-manager scripts, generated binaries, dynamic import/eval/exec, shell/subprocess use, filesystem or network access, environment/secret reads, and test hooks such as `pytest_plugins`, `conftest.py`, fixtures, and `autouse`. If the pass finds a credible injection or supply-chain risk, do not run the PR code; continue with static review only and state the risk clearly.
+7. Review the PR head in a clean tree. If unrelated local artifacts make the shared checkout dirty, use a temporary worktree at the PR head for inspection and tests, then remove it before finishing. When running containerized validation against a temporary worktree, run the container as the host user or otherwise ensure generated files can be removed during cleanup. Flag only issues introduced or materially changed by this PR, not pre-existing code it merely touches.
 
 ## Review Standard
 
@@ -78,6 +79,8 @@ Report only actionable findings. Prefix each finding with exactly one severity:
 - `Question`: clarification needed before deciding whether a change is required.
 
 For each finding, state the issue, why it matters, a concrete fix, and the relevant file or docs link. Keep comments concise and anchored to changed lines when posting inline.
+
+For first-time or external contributors, keep GitHub review comments encouraging while preserving technical clarity: acknowledge useful work when true, frame required changes as concrete next steps, and do not soften `Blocking` severity when the issue genuinely blocks merge.
 
 For top-level review-body findings that are not posted inline, include a short stable marker after the finding heading, for example `<!-- gh-review-pr:finding=integer-no-good-cut -->`. Keep markers unique within the review. Inline comments do not need extra markers because GitHub provides comment ids.
 
