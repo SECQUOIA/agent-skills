@@ -14,6 +14,7 @@ Apply every convention below unless the invoking skill explicitly overrides it (
 ## Tooling And Repository Resolution
 
 - Use `gh` for every GitHub interaction. Do not use MCP servers, browser automation, or the GitHub web UI.
+- If `gh` is not on `PATH` and the shell reports `gh: command not found`, do not conclude `gh` is unavailable under WSL/Linux: check `PATH` (or `/mnt/c/Program Files/GitHub CLI/gh.exe`) for a Windows `gh.exe` and use it. Quote the full path because it contains a space, and set it once per command (shell variables do not persist across separate tool calls). Confirm it is authenticated with `gh auth status` before relying on it.
 - If `gh <cmd> --json` rejects a field, retry with supported fields or `gh api`; do not treat an unsupported field as PR/issue state.
 - If a `gh pr`/`gh issue` write fails because the CLI queries a deprecated or unavailable GraphQL side field such as classic Projects `projectCards`, retry the same state change through the narrow REST `gh api` endpoint, then re-read the object to verify the write.
 - Resolve the PR/issue from the user's URL or number, or from the current branch when they say "this PR"/"current PR". If a bare number is not found in the default repository, inspect configured remotes (`origin`, `upstream`, and forks) and retry with the exact `--repo OWNER/REPO`. Once resolved, use that repository consistently for all `gh` calls.
