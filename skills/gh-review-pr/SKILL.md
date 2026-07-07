@@ -47,7 +47,7 @@ For API migration or deprecation PRs, treat unexpected warnings in targeted test
 
 Keep extra validation proportional to the PR. When relevant:
 
-- For notebook/output-refresh PRs, verify the PR body matches the current branch behavior, committed outputs, required credentials, and validation actually performed; stale PR metadata is review feedback even when code is correct.
+- For notebook/output-refresh PRs, verify the PR body matches the current branch behavior, committed outputs, required credentials, and validation actually performed; stale PR metadata is review feedback even when code is correct. If full notebook execution fails outside changed hunks, distinguish a pre-existing or out-of-scope notebook failure from the PR's changed behavior and require a targeted reproduction for the changed cells before accepting the limitation.
 - For parity or porting PRs, compare the analogous source and target workflows end to end, including rendered notebook outputs, follow-on analysis cells, and visualization semantics. Do not stop at checking that replacement APIs are present if the PR claims behavioral or visual parity.
 - For fixes to shared setup paths or repository-wide conventions in examples, notebooks, or config files, inspect sibling artifacts in the same family. Flag PRs that fix only the named files without a regression test or a clear reason the narrower scope is correct.
 - Test a clean merge result in a temporary worktree if the head lags the base or generated output depends on full-repo state; remove the worktree after.
