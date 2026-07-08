@@ -58,4 +58,4 @@ In a managed repo, never edit the default branch in place and never push automat
 
 ## Final Response
 
-Summarize the lessons implemented, the skills changed, validation performed, and any lessons intentionally declined as too broad or one-off. In a managed repo, also report the personal branch used and that submitting the accumulated learnings for review is a separate, user-initiated step.
+Summarize the lessons implemented, the skills changed, validation performed, and any lessons intentionally declined as too broad or one-off. Always state whether this skill itself changed or was intentionally left unchanged, with the reason, because invoking it makes it a natural candidate target. In a managed repo, also report the personal branch used and that submitting the accumulated learnings for review is a separate, user-initiated step.
