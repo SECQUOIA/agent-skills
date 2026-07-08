@@ -49,7 +49,7 @@ Some skills are distributed through a shared repository that a single reviewer c
 
 In a managed repo, never edit the default branch in place and never push automatically:
 
-- Commit lessons on a personal working branch. If the working tree is on the default branch, create `learnings/<user>` from the current default branch first, then commit there with a clear message.
+- Commit lessons on a personal working branch. If the working tree is on the default branch, create `learnings/<user>` from the current default branch first, then commit there with a clear message. Before writing the message, check `git log --oneline -5 -- <target file>` (or the repo's recent history) for an established convention — for example a shared `learnings:` prefix — and match it instead of inventing a new style, since the same `gh-review-pr`/`gh-merge-pr` skills will later process this branch's history.
 - If the personal branch already has uncommitted skill changes, inspect them before editing. When they are valid accumulated lessons, validate and commit them before finalizing the pass (use separate commits when practical); when they are unrelated or ambiguous, leave them untouched and report that they must be resolved before `submit-learnings` can run.
 - Accumulate lessons on that branch across sessions. Do not open or push a pull request on every invocation; the repo's cadence (for example a weekly push reviewed by a single reviewer) owns that step.
 - Before starting new edits, fetch and rebase the personal branch on the latest default branch so already-merged updates from others are incorporated and conflicts surface early. Keep each lesson small and self-contained to minimize cross-author merge conflicts.
