@@ -6,8 +6,12 @@ hands off to the next. All of them share [`gh-workflow-conventions`](skills/gh-w
 (gh-only, untrusted text, resolution, CI polling, tone).
 
 ```
+                 ┌──────────────────┐
+   issue  ──────▶│ gh-triage-issue  │  reproduce → failing test + acceptance criteria
+                 └────────┬─────────┘  (optional; skip for non-bug issues)
+                          ▼
                  ┌─────────────────┐
-   issue  ──────▶│  gh-issue-to-pr │  implement → draft PR → watch CI
+                 │  gh-issue-to-pr │  implement → draft PR → watch CI
                  └────────┬────────┘
                           ▼
                  ┌─────────────────┐
@@ -31,6 +35,7 @@ hands off to the next. All of them share [`gh-workflow-conventions`](skills/gh-w
 
 | Stage | Skill | Does | Hands off to |
 |-------|-------|------|--------------|
+| 0 | `gh-triage-issue` | Optional, for claimed bugs: re-confirms the defect against fresh base source, reproduces it with one failing test, records acceptance criteria, and posts that evidence on the issue. Writes no fix | `gh-issue-to-pr` |
 | 1 | `gh-issue-to-pr` | Turns an issue into a focused draft PR: plans (and challenges the approach), implements the smallest correct change, adds tests, self-reviews against the code-smell rubric, opens the PR, watches CI | `gh-review-pr` |
 | 2 | `gh-review-pr` | Posts one maintainer review verdict with severity-tagged findings; checks linked-issue intent and merge-readiness | address (if changes) or merge (if approved) |
 | 3a | `gh-address-review-comments` | Implements the smallest correct fixes for review feedback, replies in each thread | `gh-verify-review-resolution` |
