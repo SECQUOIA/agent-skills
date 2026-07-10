@@ -33,6 +33,8 @@ For each comment or thread, decide whether it is:
 
 If declining a Blocking comment, do not treat it as closed. Call it out at the top of the summary, explain the reasoning, and reply on the thread that it remains unresolved pending maintainer review.
 
+For broad design or naming feedback that may be out of scope, first verify the local code path and nearby repository convention. In the reply, state whether any change is needed in the current PR, distinguish an existing convention from a defect, and frame wider API or data-structure changes as a separate follow-up only when the evidence supports that.
+
 A comment is `Blocking` when it carries the `Blocking` severity prefix posted by the maintainer review; if it has no explicit severity, treat correctness, regression, missing test for changed behavior, broken public API, security, or serious maintainability issues as Blocking. Treat the posted prefix as authoritative and do not silently downgrade it.
 
 ## Implement Fixes
@@ -43,6 +45,7 @@ A comment is `Blocking` when it carries the `Blocking` severity prefix posted by
 - If the actionable feedback is only repository settings, such as branch-protection required status checks, update those settings through `gh api` only when maintainer/user policy authorizes it. Preserve unrelated settings such as strictness, review rules, and non-target contexts; verify by re-reading the settings and PR merge state; do not create a repository commit for a settings-only fix.
 - When fixing PR metadata for generated sites or GitHub Pages, verify whether linked site URLs point at a fork preview or the canonical upstream deployment. Do not leave a fork Pages URL presented as the main site after the PR is merge-ready; label it as preview-only or replace it with the intended repository Pages URL.
 - Keep broader fixes within the PR's existing scope; record large or risky follow-ups instead of expanding the PR unilaterally.
+- When addressing scope feedback by removing an out-of-scope change, verify the full PR diff against the base branch after the cleanup so line-ending-only or formatting-only deltas do not leave the file in the PR. If the PR title/body still mentions the removed change, update the metadata through `gh` and re-read it.
 - Add or update tests when the comment identifies a bug, regression risk, or behavior that should be preserved.
 - For a bug, first add a reproducing test that fails on the current code, then make it pass.
 - When feedback adds benchmark, performance, or case-study coverage, run a small representative sweep when practical and summarize the observed behavior. If a required solver, license, dataset, or service is unavailable, report the exact blocker instead of inferring performance from wiring or smoke tests.
