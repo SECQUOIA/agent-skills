@@ -27,6 +27,10 @@ Your install symlinks point at this clone, so your live skills are always "`main
 
 ```bash
 # 1. Pick up everyone else's merged updates first (surfaces conflicts early)
+#    Easiest: run the skill, which also refreshes install links when skills
+#    were added or removed:
+#      $sync-secquoia-skills
+#    Or by hand:
 git fetch origin
 git rebase origin/main
 
@@ -38,7 +42,7 @@ git push -u origin learnings/<your-github-username>
 gh pr create --base main --title "learnings: <short summary>" --fill
 ```
 
-Then the reviewer reviews and merges. After a merge, everyone runs the rebase in step 1.
+Then the reviewer reviews and merges. After a merge, everyone runs `$sync-secquoia-skills` (or the rebase in step 1 by hand).
 
 Keep each lesson **small and self-contained** — one focused improvement per commit — so PRs are easy to review and rarely conflict.
 
