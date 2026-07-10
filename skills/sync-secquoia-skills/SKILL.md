@@ -17,6 +17,7 @@ This skill only updates local state: it fetches, rebases the personal branch, an
 2. Determine the default branch with `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'`.
 3. Determine the current branch. By convention it is a personal `learnings/<user>` branch; if it is the default branch, skip the rebase and only fast-forward it. If it is some other non-default branch, treat it as the learnings branch but say so in the final report.
 4. Require a clean working tree. If it is dirty, stop and report the offending files — do not stash, commit, or discard changes here; uncommitted lessons belong to `apply-conversation-lessons`.
+5. Keep skill identity changes separate from sync. If the user also asks to rename this skill or another skill, finish the sync first, then treat the rename as a distinct skill-edit task. Before changing directories, frontmatter `name`, docs, or installed links, confirm any requested name that contains a leading slash or appears to be a misspelling or near-duplicate of an existing skill id; skill ids themselves use lowercase letters, digits, and hyphens, not slash prefixes.
 
 ## Workflow
 
