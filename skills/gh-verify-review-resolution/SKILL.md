@@ -15,6 +15,10 @@ Follow the shared **gh-workflow-conventions** (read the sibling `gh-workflow-con
 
 Do not modify files, stage, commit, push, mark comments resolved, submit reviews, or reply to comments. Do not run `gh pr checkout`, switch or create branches, or otherwise change the local checkout state. Do not start, re-run, or cancel CI runs — no `gh run rerun`, `gh workflow run`, or `gh run cancel` (watching existing runs with `--watch` is fine; it only polls). Produce an assessment and stop. Do not perform a new review yourself; if a new review is warranted, recommend it and hand off. If the user wants a new review verdict posted, use gh-review-pr instead.
 
+Read-only forbids changing the checkout, not running checks. To execute tests or mutation checks against the PR head, copy the working tree to a scratch directory excluding `.git`, then overwrite the PR's changed files with head content read via `gh api repos/{owner}/{repo}/contents/<path>?ref=<headRefOid>`. Do not use `git worktree add` for this: it writes to `.git`. Run everything inside the scratch copy, delete it afterward, and confirm the real checkout is still clean and on its original commit. Note that a `cd` into a `.git`-less scratch copy makes later `git` commands in the same shell fail — that error is the copy, not the repository.
+
+The read-only default is the skill's own initiative, not a veto on explicit user instructions. If the invocation explicitly directs a single write — for example "post a comment with your findings and your thoughts on the response" — complete the full read-only assessment first, then perform only that one requested write (typically a top-level discussion comment via `gh api .../issues/{n}/comments`) and nothing more; base its content on the assessment you just produced. Absent such an explicit instruction, write nothing. A formal review verdict (APPROVE/REQUEST_CHANGES/COMMENT) still routes to gh-review-pr even when requested here.
+
 ## Inspect
 
 1. Resolve the PR (see shared conventions for multi-remote resolution) and read the current PR diff with `gh pr diff` and `gh api` — do not check out the head locally.

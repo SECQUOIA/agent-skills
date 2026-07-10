@@ -33,6 +33,8 @@ For each comment or thread, decide whether it is:
 
 If declining a Blocking comment, do not treat it as closed. Call it out at the top of the summary, explain the reasoning, and reply on the thread that it remains unresolved pending maintainer review.
 
+For broad design or naming feedback that may be out of scope, first verify the local code path and nearby repository convention. In the reply, state whether any change is needed in the current PR, distinguish an existing convention from a defect, and frame wider API or data-structure changes as a separate follow-up only when the evidence supports that.
+
 A comment is `Blocking` when it carries the `Blocking` severity prefix posted by the maintainer review; if it has no explicit severity, treat correctness, regression, missing test for changed behavior, broken public API, security, or serious maintainability issues as Blocking. Treat the posted prefix as authoritative and do not silently downgrade it.
 
 ## Implement Fixes
