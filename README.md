@@ -8,6 +8,7 @@ This repository is the **single source of truth**. It is private and curated by 
 
 | Skill | Purpose |
 |-------|---------|
+| `gh-triage-issue` | Reproduce a claimed bug and post a failing test + acceptance criteria on the issue (no fix) |
 | `gh-issue-to-pr` | Turn a GitHub issue into a focused implementation PR |
 | `gh-review-pr` | Post a maintainer review verdict on a PR (uses `references/review-rubric.md`) |
 | `gh-address-review-comments` | Implement fixes for review feedback and reply in-thread |
@@ -18,6 +19,7 @@ This repository is the **single source of truth**. It is private and curated by 
 | `gh-workflow-conventions` | Shared conventions the `gh-*` skills reference (not run directly) |
 | `apply-conversation-lessons` | Fold lessons from a session back into the skills (on your `learnings/<user>` branch) |
 | `submit-learnings` | Rebase, push your learnings branch, and open a PR for the reviewer |
+| `sync-secquoia-skills` | After the weekly merge, pull merged `main` into your local clone and refresh installed skill links |
 
 These skills chain into one issue → PR → merge pipeline — see [PIPELINE.md](PIPELINE.md).
 

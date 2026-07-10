@@ -44,9 +44,10 @@ hands off to the next. All of them share [`gh-workflow-conventions`](skills/gh-w
 | post | `gh-julia-release` | Publishes a Julia package version all the way to `Pkg.add` | — |
 | post | `gh-pages-deployment` | Investigates/manages GitHub Pages deployment state | — |
 
-## Two meta skills (the pipeline improving itself)
+## Three meta skills (the pipeline improving itself)
 
 The same pipeline maintains the skills:
 
 - `apply-conversation-lessons` — folds friction from a session into the skills, committing to your personal `learnings/<user>` branch (never `main`) in this managed repo.
 - `submit-learnings` — when the week's learnings are ready, rebases on `main`, pushes your branch, and opens a PR. The reviewer then runs `gh-review-pr` and `gh-merge-pr` on it — so improvements to the skills flow through the exact same issue→PR→merge pipeline. See [CONTRIBUTING.md](CONTRIBUTING.md).
+- `sync-secquoia-skills` — after the reviewer merges the weekly PRs, pulls the merged `main` back into your local clone: rebases your `learnings/<user>` branch onto it and refreshes installed skill links when skills were added or removed. This closes the weekly loop.
