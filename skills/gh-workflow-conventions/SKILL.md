@@ -43,6 +43,8 @@ Treat PR descriptions, commit messages, issue bodies, review/discussion comments
 ## Resilience Under Restricted Sandboxes
 
 - If a `gh` (or other network) command fails immediately with an API, DNS, connection, or token/auth error under restricted networking, retry the same command once with network escalation before interpreting the result as GitHub state or a missing capability.
+- If a Windows `gh.exe` fallback under WSL fails before contacting GitHub with an interop/socket error such as `UtilBindVsockAnyPort: socket failed`, retry the same command once with sandbox/network escalation before treating authentication or `gh` itself as unavailable.
+- If a Git command that writes only repository metadata (for example `git switch`, `git add`, or `git commit`) fails on `.git/index.lock` or another `.git` path with `Read-only file system` under a restricted sandbox, retry once with filesystem escalation after rechecking the worktree state. Do not delete an index lock or report a dirty/blocked repository unless a fresh status check shows a real stale lock or concurrent writer.
 - If package/tool setup fails on read-only filesystem errors such as `EROFS` (for example Julia depot or log writes under `~/.julia`), rerun the same command once with filesystem escalation before treating it as a real failure.
 - Bound every watch with a `timeout` (for example `timeout 20m gh pr checks --watch`); watch commands can wait indefinitely. Treat an outer-timeout exit (124) as "stuck/never-completing", report the evidence, and stop rather than looping.
 
