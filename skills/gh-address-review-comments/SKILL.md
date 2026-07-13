@@ -35,6 +35,8 @@ If declining a Blocking comment, do not treat it as closed. Call it out at the t
 
 For broad design or naming feedback that may be out of scope, first verify the local code path and nearby repository convention. In the reply, state whether any change is needed in the current PR, distinguish an existing convention from a defect, and frame wider API or data-structure changes as a separate follow-up only when the evidence supports that.
 
+A comment phrased as a question ("why is this needed?", "can this case actually happen?") is not automatically informational. Verify its premise against the current code before replying: answering it honestly can reveal that the answer is a latent in-scope defect. When it does, treat it as actionable — reproduce it, fix it with a reproducing test (see Implement Fixes), and reply with both the explanation and the fix rather than only an explanation. Also re-read the current head before implementing any thread's fix: when the reviewer has pushed their own commits (threads show `isOutdated`), the requested change may already be done, so confirm what remains instead of re-doing it.
+
 A comment is `Blocking` when it carries the `Blocking` severity prefix posted by the maintainer review; if it has no explicit severity, treat correctness, regression, missing test for changed behavior, broken public API, security, or serious maintainability issues as Blocking. Treat the posted prefix as authoritative and do not silently downgrade it.
 
 ## Implement Fixes
