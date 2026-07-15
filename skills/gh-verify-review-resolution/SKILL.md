@@ -71,3 +71,5 @@ Use exactly these sections:
 6. Recommended next action
 
 Do not carry out the recommended action. Keep the tone concise and professional; no emoji or praise padding.
+
+When every item is `Addressed` and the fixes verify at head, include in "Recommended next action" an offer to post an affirming summary comment — a short "verification pass confirms each comment is addressed and the fixes are correct" note attributed to the assessment. Even though a comment from the PR-author account cannot serve as a formal `APPROVE` (that still routes to gh-review-pr), such a comment records the per-item resolution and gives the final human reviewer a ready starting point, which the reviewer must otherwise reconstruct. Recommend it; do not post it unprompted. Post it only when the user directs the write (or already framed this run as an explicit single write), through the single-write path in Read-Only Rules — never as a default side effect of verification.
