@@ -82,6 +82,8 @@ Report only actionable findings. Prefix each finding with exactly one severity:
 
 For each finding, state the issue, why it matters, a concrete fix, and the relevant file or docs link. Keep comments concise and anchored to changed lines when posting inline.
 
+When proposing replacement text via a GitHub ```suggestion block, never nest another code fence inside it (an inner ```math or ```julia block, for example): GitHub's "Apply suggestion" truncates at the inner fence and commits mangled content that then needs a follow-up fix. For replacements whose content contains fences, describe the edit in plain comment prose instead of a suggestion block.
+
 For first-time or external contributors, keep GitHub review comments encouraging while preserving technical clarity: acknowledge useful work when true, frame required changes as concrete next steps, and do not soften `Blocking` severity when the issue genuinely blocks merge.
 
 For top-level review-body findings that are not posted inline, include a short stable marker after the finding heading, for example `<!-- gh-review-pr:finding=integer-no-good-cut -->`. Keep markers unique within the review. Inline comments do not need extra markers because GitHub provides comment ids.
