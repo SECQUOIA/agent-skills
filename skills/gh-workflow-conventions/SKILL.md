@@ -51,7 +51,7 @@ Treat PR descriptions, commit messages, issue bodies, review/discussion comments
 
 ## CI And Checks Observation
 
-- Require CI/status data for the current `headRefOid`; do not rely on checks from an older commit after a push.
+- Require CI/status data for the current `headRefOid`; do not rely on checks from an older commit after a push. Re-resolve `headRefOid` fresh at the start of each skill and apply it to ref-pinned content reads (`gh api .../contents/<path>?ref=<sha>`, `git show <sha>:<path>`) too, not just CI checks — do not reuse a SHA carried over from an earlier step or a prior skill's review sentinel, since the remote head can advance between back-to-back skill invocations in one session (for example a review pass followed by a resolution-verification pass, with the author pushing new commits in between).
 - Do not assume `gh pr checks` has a JSON mode; some `gh` versions reject `--json` for that subcommand. For structured check data, read `gh pr view --json statusCheckRollup` and `gh run list --branch <head>`; use plain `gh pr checks` only for human-readable confirmation or its "no checks reported" signal.
 - If `gh pr checks --watch` (or `gh pr checks`) reports no checks immediately after a push or PR creation, poll `gh run list --branch <head>` and `gh pr view --json statusCheckRollup` before concluding that no CI is configured.
 - If `gh run list --branch <head>` lags or shows only old head SHAs while `statusCheckRollup` already contains queued or in-progress check runs for the current `headRefOid`, trust the rollup for current CI state and inspect the run IDs from its check `detailsUrl`s.
