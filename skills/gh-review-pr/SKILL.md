@@ -34,10 +34,15 @@ Inspect the diff, surrounding code, tests, docs, and repository conventions for:
 - public API, CLI, UX, or documentation inconsistencies
 - maintainability risks that matter to future maintainers
 - security or data-safety issues
+- design and scope: whether the change *should exist as written*, not only whether it works — minimal public surface (no second interface doing roughly what an existing one does; a superseded/experimental spelling not yet in any released version is debt to remove now, not compatibility to preserve), staying within the repo's stated version/scope assumptions (e.g. "v1" contracts), keeping layer boundaries clean (a general/interface-level function must not encode downstream/backend specifics in its code or docs), and avoiding constructions whose cost grows combinatorially when a bounded one exists.
+
+Correct, tested, and green is necessary but not sufficient. A maintainer also asks "is this the right change for where the codebase is going?" — and blocks correct code on design or scope grounds when it adds interface debt, exceeds the stated version scope, leaks backend concerns into a general layer, or pushes validation/normalization into inner or hot paths instead of doing it once at the public boundary or constructor. Surface these as first-class findings at the severity a maintainer would assign; do not downgrade them to `Nonblocking` merely because the code passes tests. When you catch yourself concluding "works, only nits," recheck the change against this design/scope lens before finalizing.
 
 When judging maintainability, apply the code-smell baseline in [references/review-rubric.md](references/review-rubric.md); read that file for the smell list and the rules that keep it from producing noise (repo standards override, smells are judgement calls, skip anything tooling enforces).
 
 Verify behavioral claims by running commands, imports, tests, or entry points when practical; run at least the targeted changed-behavior test locally when cheap, and scale broader local validation to risk (active-environment and license-probe escalation are in the shared conventions). For PRs from untrusted authors, run contributor-controlled code only in an isolated environment; if isolation is unavailable, review statically and say why.
+
+When a PR widens an input range (a new domain, dimension, type, or value set), check the *general* case against the underlying framework/dependency contract, not just the exercised happy path: confirm the library actually defines the operator/state/method for every value the change now admits (and that the tests cover the extremes, not one interior example). "The added test passes" answers a narrower question than "does this hold across the range it now claims to support."
 
 After local validation, inspect changed areas for ignored disposable artifacts created by the check itself, such as Python `__pycache__/` directories from workflow tests. Clean safe test caches before posting the review, or report any generated residue that cannot be removed safely.
 
