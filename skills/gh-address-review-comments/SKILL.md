@@ -33,6 +33,8 @@ For each comment or thread, decide whether it is:
 
 When the user explicitly asks to include nonblocking comments, treat the severity label as urgency only: implement every safe, actionable, in-scope nonblocking comment instead of deferring it as optional polish. Still decline incorrect, harmful, or out-of-scope requests with an explanation.
 
+Do not manufacture work from a review observation that explicitly concludes no change is needed. An author-side or workflow-generated `COMMENT` review can mention an optional alternative while saying the current implementation is preferable or acceptable; after verifying its premise, classify that observation as informational. Genuine requests remain actionable regardless of reviewer identity. If this leaves the pass empty, follow the no-op path and explain the decision in the required summary.
+
 If declining a Blocking comment, do not treat it as closed. Call it out at the top of the summary, explain the reasoning, and reply on the thread that it remains unresolved pending maintainer review.
 
 For broad design or naming feedback that may be out of scope, first verify the local code path and nearby repository convention. In the reply, state whether any change is needed in the current PR, distinguish an existing convention from a defect, and frame wider API or data-structure changes as a separate follow-up only when the evidence supports that.
