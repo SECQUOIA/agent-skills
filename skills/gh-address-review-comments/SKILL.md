@@ -70,7 +70,7 @@ A comment is `Blocking` when it carries the `Blocking` severity prefix posted by
 4. Push the branch.
 5. If CI is expected, watch or poll it after pushing (the no-checks-after-push polling rule and the running-job log limitation are in the shared conventions).
 6. Compare the current PR body with the pushed head. If the fixes made exact test counts, commands, head-specific provenance, or verification conclusions stale, update only those fields through `gh` and re-read the body; do not leave the top-level summary as the sole correction to stale PR metadata.
-7. If the addressed feedback was a body-only COMMENT review about merge-readiness state, such as a draft PR or branch behind its base, re-read `reviewDecision`, `isDraft`, and `mergeStateStatus` after pushing or editing metadata. Do not imply the review gate is satisfied; report any remaining formal approval requirement in the summary.
+7. Re-read `reviewDecision` after every push before reporting the result: repository policy can dismiss a prior approval when new commits arrive, so the review's original state is not evidence that approval survived. If the addressed feedback was a body-only COMMENT review about merge-readiness state, such as a draft PR or branch behind its base, also re-read `isDraft` and `mergeStateStatus` after pushing or editing metadata. Do not imply the review gate is satisfied; report any remaining formal approval requirement in the summary.
 8. If the addressed feedback came from a `CHANGES_REQUESTED` review, re-read `reviewDecision` after pushing and reporting replies. Do not imply the review is cleared just because code and CI are green; say that the formal decision remains `CHANGES_REQUESTED` until the reviewer updates or dismisses it.
 
 ## GitHub Replies
