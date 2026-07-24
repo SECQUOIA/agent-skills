@@ -55,6 +55,8 @@ For each review comment, review-body finding, and discussion comment, classify i
 
 For each item, provide a brief explanation, supporting commit/file/test when applicable, and any needed follow-up. If a Blocking comment was declined rather than fixed, flag it separately as a declined Blocking comment requiring a human decision; do not fold it into `Not addressed`.
 
+When a finding's own prescribed remedy was to open a follow-up issue or otherwise defer (typically a `Nonblocking` finding that explicitly says "recommend a follow-up" and does not ask for a code change in this PR), classify it `Addressed` — noting it was handled as a deferral — once the deferral is valid per the Inspect step: the follow-up issue exists, cross-links resolve in both directions, and the finding's premise still holds at the current head. Do not classify such an item `Not addressed` merely because the PR code is unchanged; unchanged code is the requested outcome, not an unmet request. This is distinct from a declined Blocking comment, where the requested fix was skipped rather than intentionally routed to a tracked follow-up.
+
 A comment is `Blocking` when it carries the `Blocking` severity prefix posted by the maintainer review; if it has no explicit severity, treat correctness, regression, missing test for changed behavior, broken public API, security, or serious maintainability issues as Blocking. Treat the posted prefix as authoritative. For review-body findings, use `<!-- gh-review-pr:finding=... -->` markers when present and otherwise use the severity-prefixed title as the item identity.
 
 ## Review-Round Decision
