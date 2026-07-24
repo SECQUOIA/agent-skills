@@ -62,6 +62,8 @@ A partial address or a fix spanning several files is a follow-up note, not autom
 
 Cap the loop. If the review-resolution-verification cycle has already run the agreed maximum number of rounds, default three, or if the same comment or class of issue keeps recurring, do not recommend another automated round. Escalate to a human and state that the loop is not converging.
 
+Distinguish a non-converging loop from a converging one when the reviewer and author are the same account (self-review). Successive rounds that only surface progressively smaller `Nonblocking` refinements, each promptly addressed, are converging, not stuck — recommend merge rather than another round even if a criterion above (for example "CI/build/test logic changed materially") would otherwise trigger one. Each round of automated review-then-fix has a cost; once no blocking finding is outstanding and the head passes, prefer close-out over another self-review pass.
+
 ## Final Response
 
 Use exactly these sections:
