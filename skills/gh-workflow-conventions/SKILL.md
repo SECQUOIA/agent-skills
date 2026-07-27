@@ -18,6 +18,12 @@ Apply every convention below unless the invoking skill explicitly overrides it (
 - Treat `gh auth status` as a diagnostic, not the sole authentication gate. If it reports an invalid token but a narrow explicit-repository read such as `gh pr view <N> --repo OWNER/REPO` or `gh api repos/OWNER/REPO` succeeds, use the successful API operation as current-session evidence and continue; do not force reauthentication. If the narrow read also fails, follow the network-escalation rule before classifying it as an authentication failure.
 - If Windows `gh.exe` runs Git against a WSL checkout and fails with Git's `detected dubious ownership` safe-directory error, do not blindly add a global safe.directory entry. First verify whether the local branch is already the intended PR head (`git rev-parse HEAD` equals `headRefOid`) and clean; if so, treat checkout as satisfied and continue with local Git plus `gh` API calls. Only change Git trust configuration when the workflow truly needs Windows-side Git to operate on that checkout.
 - If `gh <cmd> --json` rejects a field, retry with supported fields or `gh api`; do not treat an unsupported field as PR/issue state.
+- `gh api --jq` expects a JSON response. Do not combine it with an
+  `Accept: application/vnd.github.raw...` header: raw file contents such as a
+  Markdown heading are parsed as JSON and fail with errors like `invalid
+  character '#' looking for beginning of value`. Either request raw content
+  without `--jq`, or request the normal contents JSON and decode its `.content`
+  field.
 - Pass an explicit repository to `gh repo view` positionally (`gh repo view OWNER/REPO`), not with `--repo`; CLI versions that support `--repo` on PR and issue subcommands may still reject that flag on `repo view`.
 - For repository-scoped `gh search prs` or `gh search issues`, pass the search term positionally and the repository with `--repo OWNER/REPO` (for example, `gh search prs 125 --repo OWNER/REPO --state open`). Do not put `repo:OWNER/REPO <term>` inside one quoted positional argument; `gh` can parse the whole quoted value as the repository qualifier and reject the query.
 - Do not assume every `gh` subcommand exists in the installed build; `gh label` in particular is absent from older versions. When a subcommand fails with `unknown command`, fall back to the REST endpoint (for example `gh api repos/OWNER/REPO/labels --paginate --jq '.[].name'`) before concluding the resource itself does not exist.
