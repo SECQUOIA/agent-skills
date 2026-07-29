@@ -22,6 +22,7 @@ This skill cannot run automatically at every conversation end. Use it when the u
 2. Triage each lesson.
    - Keep lessons that are reusable, procedural, and likely to prevent repeated friction.
    - Drop one-off project facts, transient tool outputs, personal notes, and broad style preferences already covered by system instructions.
+   - Search the candidate target for each lesson before editing. If the guidance is already stated, classify the episode as an execution miss instead of adding synonymous instructions; report the existing rule and edit only when the conversation exposed a missing or ambiguous instruction.
    - Map each kept lesson to the smallest relevant existing skill. Create a new skill only if no existing skill has a natural ownership boundary.
    - When a lesson applies across several sibling skills that share a conventions subskill (for example the `gh-*` skills that read `gh-workflow-conventions`), map it to the shared subskill instead of repeating the change in each skill. Keep a lesson in a single skill only when it applies there alone.
 

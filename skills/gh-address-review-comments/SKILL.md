@@ -32,6 +32,13 @@ For each comment or thread, decide whether it is:
 - incorrect or harmful
 - Blocking but declined, which requires human escalation
 
+When one umbrella comment and several inline comments describe the same design
+correction, build one acceptance map linking every target to the shared
+refactor before editing. Implement and validate the coherent refactor once,
+then reply to each target separately; do not make isolated thread-by-thread
+changes that preserve the duplication or architecture the reviewer asked to
+remove.
+
 When the user explicitly asks to include nonblocking comments, treat the severity label as urgency only: implement every safe, actionable, in-scope nonblocking comment instead of deferring it as optional polish. Still decline incorrect, harmful, or out-of-scope requests with an explanation.
 
 Do not manufacture work from a review observation that explicitly concludes no change is needed. An author-side or workflow-generated `COMMENT` review can mention an optional alternative while saying the current implementation is preferable or acceptable; after verifying its premise, classify that observation as informational. Genuine requests remain actionable regardless of reviewer identity. If this leaves the pass empty, follow the no-op path and explain the decision in the required summary.
@@ -60,6 +67,7 @@ A comment is `Blocking` when it carries the `Blocking` severity prefix posted by
 - Add or update tests when the comment identifies a bug, regression risk, or behavior that should be preserved.
 - For a bug, first add a reproducing test that fails on the current code, then make it pass.
 - When feedback adds benchmark, performance, or case-study coverage, run a small representative sweep when practical and summarize the observed behavior. If a required solver, license, dataset, or service is unavailable, report the exact blocker instead of inferring performance from wiring or smoke tests.
+- When broad feedback requests simplification or removal, turn each reviewer bullet into a concrete acceptance check. Pair representative execution with source/diff searches showing that removed APIs, fields, artifacts, or duplicate paths are actually gone; line-count reduction alone is supporting evidence, not proof.
 - Update docs when behavior, usage, or public API expectations change.
 - When feedback flags stale source line references in docs, preserve traceability with stable citations: pin line ranges to the commit or artifact revision where they were verified when that revision is already part of the provenance, or drop bare line numbers and keep symbol names when no stable revision exists. Verify by searching for remaining moving `file:line` citations and by checking the pinned symbols or ranges resolve at the cited revision.
 - Never make checks pass by deleting, skipping, or weakening tests/checks.
