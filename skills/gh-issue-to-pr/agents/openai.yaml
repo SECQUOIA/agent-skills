@@ -1,4 +1,4 @@
 interface:
   display_name: "Issue to PR"
-  short_description: "Turn a GitHub issue into a PR"
-  default_prompt: "Use $gh-issue-to-pr to validate a GitHub issue, implement the smallest correct fix, push it, and open a pull request."
+  short_description: "Turn one or more GitHub issues into PRs"
+  default_prompt: "Use $gh-issue-to-pr to decide whether the named GitHub issues form one coherent change, implement the safe grouping, and open the appropriate pull request or pull requests."

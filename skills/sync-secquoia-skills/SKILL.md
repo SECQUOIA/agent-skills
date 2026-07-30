@@ -22,15 +22,17 @@ This skill only updates local state: it fetches, rebases the personal branch, an
 ## Workflow
 
 1. Record the pre-sync state.
+   - Record the checked-out branch's pre-sync `HEAD` separately from the old `origin/<default>` SHA. They answer different questions: how the local branch moved versus what the fetch brought into the default branch.
    - `git fetch origin refs/heads/<default>:refs/remotes/origin/<default>` (an explicit refspec, so the remote-tracking ref itself is refreshed).
    - Record the old and new `origin/<default>` SHAs, and the branch's own commits (`git log --oneline origin/<default>..HEAD` before fetching may be stale — compute counts after the fetch).
    - Record the current skill directory set (`git ls-tree --name-only HEAD:skills`) to compare after the update.
-   - If the old and new default-branch SHAs are equal and the branch is already based on it, report "already up to date" and stop after the install check below.
+   - If the old and new default-branch SHAs are equal and the branch is already based on it, report "already up to date" and stop after the install check below. An empty fetch range alone is not enough: a prior workflow may already have refreshed `origin/<default>` while the personal branch still needs to advance or rebase.
 
 2. Update the branch.
    - On the personal learnings branch: `git rebase origin/<default>`. Commits already merged upstream are skipped automatically; if every local commit was merged (the usual case right after the weekly merge), the branch ends up even with the default branch — report that explicitly, it is the expected outcome, not an error.
    - On the default branch: `git pull --ff-only`; if fast-forward is not possible, stop and report instead of creating a merge commit.
    - If the rebase conflicts, stop and report the conflicting files and the exact state (`git status`), and leave the rebase in place for the user to resolve or abort (`git rebase --abort` restores the pre-sync state). Do not force resolutions or skip commits; conflicts usually mean the reviewer merged someone else's change to the same skill lines, and the user should decide whose wording survives.
+   - Compute "unmerged local commits" against the refreshed `origin/<default>`, not against the personal branch's tracking remote. Because this skill deliberately does not push, `git status` may say the local branch is ahead of a stale `origin/learnings/<user>` by many commits after a successful sync; report that tracking-branch difference separately instead of calling those commits pending lessons.
    - Do not push. The remote personal branch is refreshed by `submit-learnings` on the next weekly submission.
 
 3. Refresh the installed skills.
@@ -41,9 +43,9 @@ This skill only updates local state: it fetches, rebases the personal branch, an
    - If `install.sh` is missing or fails, report the exact error and which targets were left stale rather than partially reinstalling by hand.
 
 4. Report.
-   - Summarize what came in: `git log --oneline <old-sha>..origin/<default>` and `git diff --stat <old-sha> origin/<default> -- skills/`, plus skills added or removed by name.
-   - State whether the branch is now even with the default branch or still carries N unmerged local commits (list them), whether installs were refreshed, and that a fresh agent session is needed to pick up changed skill descriptions.
+   - Report the default-branch fetch range and the local branch movement separately. Summarize what the fetch brought in with `git log --oneline <old-default-sha>..origin/<default>` and `git diff --stat <old-default-sha> origin/<default> -- skills/`; summarize how the checked-out branch moved with the pre-sync and post-sync `HEAD` SHAs (use a symmetric log when rebase rewrote commits), plus skills added or removed by name.
+   - State whether the branch is now even with the refreshed default branch or still carries N commits from `origin/<default>..HEAD` (list them), whether its personal tracking remote is stale, whether installs were refreshed, and that a fresh agent session is needed to pick up changed skill descriptions.
 
 ## Final Response
 
-Return the repo path, the branch synced, the default-branch range applied (old..new SHAs with a one-line-per-commit summary), skills added/removed/changed, whether the rebase left the branch even with the default branch or N commits ahead, whether install links or copies were refreshed, and any conflict or error that stopped the sync. Keep it concise and professional; no emoji or praise padding.
+Return the repo path, the branch synced, the default-branch fetch range and local branch `HEAD` movement as separate old..new SHA pairs, skills added/removed/changed, whether the rebase left the branch even with the refreshed default branch or N commits ahead of it, any separate stale-personal-remote status, whether install links or copies were refreshed, and any conflict or error that stopped the sync. Keep it concise and professional; no emoji or praise padding.

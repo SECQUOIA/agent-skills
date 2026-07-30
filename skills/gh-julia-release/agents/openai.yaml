@@ -1,4 +1,4 @@
 interface:
   display_name: "Julia Release"
   short_description: "Publish a Julia package release via gh"
-  default_prompt: "Use $gh-julia-release to publish a Julia patch release through PR, CI, Registrator, General, TagBot, Pkg.add verification, and downstream issue comments."
+  default_prompt: "Use $gh-julia-release to publish a Julia patch release through the repository’s documented General or URL-only workflow, including PR, CI, tagged-install verification, and release artifacts."
