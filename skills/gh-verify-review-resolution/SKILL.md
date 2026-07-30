@@ -62,13 +62,15 @@ A comment is `Blocking` when it carries the `Blocking` severity prefix posted by
 
 ## Review-Round Decision
 
-Recommend another full review round only when the fix exceeded what the original comment could have anticipated:
+Classify the next review decision as exactly one of:
 
-- behavior changed beyond the commented lines
-- new public API behavior was introduced
-- CI, build, or test logic changed materially
+- `No`: the existing findings are adequately classified and another review would only repeat the verification.
+- `Targeted`: reviewer judgment is useful, but the reason can be bounded to specific address commits, findings, files, behavior, tests, APIs, build logic, or CI logic. Prefer this for a revised approach or for behavior that moved beyond the commented lines while remaining locally scoped.
+- `Full`: the address work is broad, cross-cutting, or cannot be bounded reliably — for example, it introduced new public API behavior or materially changed CI, build, or test architecture across the PR.
 
-A partial address or a fix spanning several files is a follow-up note, not automatically grounds for a new round.
+For `Targeted`, provide a compact re-review brief containing the prior reviewed SHA, current head SHA, address commits between them, finding markers or thread IDs, affected surfaces, and the precise question the reviewer should answer. Targeting sets the review's priority, not its safety boundary: `gh-review-pr` must still re-verify the full changed-file set, relevant tests, PR metadata, regressions, and live merge gates under its own rules.
+
+A partial address or a fix spanning several files is a follow-up note, not automatically grounds for either kind of new review. Recommend another address pass when the remaining work is already defined; recommend targeted review when the revised solution needs bounded reviewer judgment.
 
 Cap the loop. If the review-resolution-verification cycle has already run the agreed maximum number of rounds, default three, or if the same comment or class of issue keeps recurring, do not recommend another automated round. Escalate to a human and state that the loop is not converging.
 
@@ -84,6 +86,8 @@ Use exactly these sections:
 4. Remaining issues
 5. Whether another review round is justified
 6. Recommended next action
+
+Begin section 5 with `No`, `Targeted`, or `Full`. For `Targeted`, include the compact re-review brief required above; for `Full`, state why a reliable narrower scope is not possible.
 
 Do not carry out the recommended action. Keep the tone concise and professional; no emoji or praise padding.
 
