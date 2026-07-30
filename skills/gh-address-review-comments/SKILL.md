@@ -100,7 +100,7 @@ Do not treat earlier unmarked replies as satisfying the reply-idempotency requir
 2. Then reply to each inline review comment in its own thread using the replies endpoint:
    - `gh api repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}/replies -f body=...`
    - The pull number segment is required. The global pull-comment path (`repos/{owner}/{repo}/pulls/comments/{comment_id}/replies`) can return 404 even when `GET repos/{owner}/{repo}/pulls/comments/{comment_id}` succeeds.
-3. In each inline reply, state whether it was addressed, how, and link the fixing commit or relevant file/test when useful.
+3. In each inline reply, state whether it was addressed, how, and link the fixing commit or relevant file/test when useful. Attribute a fix to the commit that actually changed the code, not a later comment-only touch-up. When the change is a unit annotation or other relabeling (for example `# degC` → `# [K]`), explain *why* it changed with evidence — the value's actual basis/source and what the code compares it against — rather than only asserting the new label or that it was "kept"; a bare relabel hides whether the change is a correctness fix or a mistake.
 4. For review-body findings without inline reply targets, cover each resolution in the top-level summary instead of inventing thread replies; cite its stable marker or short title when available.
 5. Keep inline replies short. Do not duplicate the full summary in each reply.
 6. Do not mark comments as resolved. If posting any comment fails, report the exact error and stop.
