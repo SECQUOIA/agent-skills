@@ -1,4 +1,4 @@
 interface:
   display_name: "Sync Skills"
-  short_description: "Pull merged main into your local skills"
-  default_prompt: "Use $sync-secquoia-skills to update your local managed skills clone: rebase your learnings branch onto the merged default branch and refresh installed skill links."
+  short_description: "Safely sync merged main into local skills"
+  default_prompt: "Use $sync-secquoia-skills to update the managed skills clone, protect pending learnings with a local backup, rebase onto the merged default branch, and refresh installed skill links."
