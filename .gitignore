@@ -1,2 +1,5 @@
 # Local install backups created by install.sh
 *.bak.*
+
+# User-specific skills that must remain local and unpublished
+/skills-local/
