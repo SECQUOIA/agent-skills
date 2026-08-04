@@ -13,6 +13,8 @@ Apply every convention below unless the invoking skill explicitly overrides it (
 
 Detailed CI/checks, test-environment, test-quality, and worktree rules live in this skill's `references/` files; the pointer sections below say when to read each. Those references are part of these conventions, not optional extras — when a workflow enters their territory, read the named file before acting.
 
+Consult them on symptoms, not only upfront. The moment a command surprises you — an unfamiliar error, a sudden flood of warnings, output contradicting what the previous run showed — grep this skill's directory (core file and `references/`) for a distinctive phrase from that output before reasoning from scratch or working around it. The traps documented here announce themselves in exactly such phrases (`trailing whitespace`, `unexpected EOF`, `Unknown keyword`), so a rule predicting the surprise usually already exists; rediscovering one by trial and error is how a documented trap gets re-sprung, and how its improvised "fix" does new damage.
+
 ## Tooling And Repository Resolution
 
 - Use `gh` for every GitHub interaction. Do not use MCP servers, browser automation, or the GitHub web UI.
