@@ -40,7 +40,7 @@ then reply to each target separately; do not make isolated thread-by-thread
 changes that preserve the duplication or architecture the reviewer asked to
 remove.
 
-When the user explicitly asks to include nonblocking comments, treat the severity label as urgency only: implement every safe, actionable, in-scope nonblocking comment instead of deferring it as optional polish. Still decline incorrect, harmful, or out-of-scope requests with an explanation.
+When the user explicitly asks to include nonblocking comments, or invokes this skill without narrowing the request to Blocking feedback, treat the severity label as urgency only: implement every safe, actionable, in-scope nonblocking comment instead of deferring it as optional polish. Still decline incorrect, harmful, or out-of-scope requests with an explanation.
 
 A reviewer can also prescribe the deferral themselves, which is the exception to that rule rather than polish you may override. When an `OWNER`, `MEMBER`, or `COLLABORATOR` raises a nonblocking item and explicitly frames the remedy as a follow-up — the common case on a head that already carries an approval at exactly that SHA, where any new commit supersedes it — treat that framing as the requested resolution. Verify the finding and any exception it names against the current code first, then record it as a follow-up issue or a coordination note on the owning issue, cross-linked from the PR body, the summary comment, and the inline reply, and offer in the reply to fold the change in instead if the author prefers. Do not push a code commit that overrides the reviewer's own deferral instruction; `gh-review-pr` prices that respin deliberately when it prescribes a deferral.
 
