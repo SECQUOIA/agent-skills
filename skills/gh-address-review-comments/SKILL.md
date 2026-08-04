@@ -112,3 +112,9 @@ Do not treat earlier unmarked replies as satisfying the reply-idempotency requir
 4. For review-body findings without inline reply targets, cover each resolution in the top-level summary instead of inventing thread replies; cite its stable marker or short title when available.
 5. Keep inline replies short. Do not duplicate the full summary in each reply.
 6. Do not mark comments as resolved. If posting any comment fails, report the exact error and stop.
+
+## Reviewer Re-request
+
+After all required summary and inline replies are posted, re-request review from each eligible human reviewer whose safe, actionable feedback this addressing cycle resolved. Deduplicate reviewer logins; exclude the PR author, the authenticated `gh` user, bots, reviewers whose targets were only informational or declined, and reviewers already present in the current `reviewRequests`. A no-op rerun whose targets already have current marker-bearing replies does not create another re-request.
+
+Immediately before requesting, re-read the open PR's `state`, `headRefOid`, and `reviewRequests`. Follow the shared review-request convention (`gh pr edit --add-reviewer`, the narrow REST fallback, and the explicit-comment fallback on permission failure), then re-read `reviewRequests` and verify that every intended login is present; never infer success from `reviewDecision`. If feedback came from a terminal source PR and was applied to an explicitly named open destination PR, request those reviewers on the destination, not the terminal source. Report the verified formal requests, skipped reviewers, and failures in the final handoff.
