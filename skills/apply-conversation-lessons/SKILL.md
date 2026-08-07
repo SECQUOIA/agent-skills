@@ -43,6 +43,7 @@ This skill cannot run automatically at every conversation end. Use it when the u
 4. Validate.
    - Run the skill validator for every changed skill when available. The validator ships with the `skill-creator` system skill, not with the edited skill's own repo: run `python <skill-creator>/scripts/quick_validate.py <skill-folder>` (e.g. `~/.codex/skills/.system/skill-creator/scripts/quick_validate.py` for Codex, or the equivalent under the Claude skills home). A skills repo shipping no validator of its own does NOT mean none is available — locate `skill-creator` before concluding validation is impossible.
    - If the validator script exists but is not executable, retry it with the appropriate interpreter such as `python <validator> <skill-folder>` before treating validation as unavailable.
+   - The validator imports PyYAML, which a bare system interpreter often lacks; `ModuleNotFoundError: No module named 'yaml'` is a wrong-interpreter result, not a broken validator or an invalid skill. Re-run it under an interpreter that has the dependency — a conda base environment or any project virtualenv on the machine — rather than installing anything or falling back to manual inspection. Probe candidates with a one-line `import yaml` check instead of guessing, since a repo-local virtualenv is frequently the one that does *not* have it.
    - If validation tooling is unavailable, at least inspect frontmatter, required fields, and Markdown structure.
    - Report any skill that could not be edited or validated.
 
