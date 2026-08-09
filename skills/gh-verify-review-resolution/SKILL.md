@@ -31,6 +31,8 @@ That delta classification governs tests; *committed generated artifacts* — exe
 
 The read-only default is the skill's own initiative, not a veto on an explicit bounded close-out request. Complete the full read-only assessment first, then perform only the requested actions: post one assessment summary, resolve threads just classified `Addressed` at the unchanged head, and/or mark an open draft PR ready for review. Re-read the exact targets immediately before and after every write; use the shared bulk-thread mutation convention, never resolve a `Partially addressed` or `Not addressed` thread, and after marking ready inspect whether `ready_for_review` triggered fresh checks. Do not infer these actions from the recommendation, merge the PR, or make any other write. A formal review verdict (APPROVE/REQUEST_CHANGES/COMMENT) still routes to gh-review-pr.
 
+Choose the write vehicle by the assessment, not by the user's noun. A top-level discussion comment fits a note with no verdict: status, an answer to a question, or a record that items look resolved. Text that states findings, assigns severities, or says whether the PR should merge is a review and routes to gh-review-pr's atomic POST, even when the user called it a comment; a discussion comment with the same words gates nothing and does not register as a review round. If a discussion comment was posted when a review was needed, post the review with the same substance, delete the duplicate comment, and report that correction.
+
 ## Inspect
 
 1. Resolve the PR (see shared conventions for multi-remote resolution) and read the current PR diff with `gh pr diff` and `gh api` — do not check out the head locally.

@@ -130,6 +130,10 @@ Before running or judging local verification, read the matching reference file; 
 
 Keep responses concise and professional; no emoji or praise padding. Use Markdown only for code, quotes, links, and short lists.
 
+Text posted to GitHub is published under the user's name, so write it in their voice as a maintainer, not as a report about your own operation. Keep technical substance — findings, evidence, commands, counts — and cut process narration about account capabilities, review mechanics, branch-protection speculation, checkout hygiene, or how the evidence was prototyped unless that detail is itself something the PR audience must act on.
+
+This trims the *posted body* only; it does not relax the verification rules those statements came from. Never invent a gate that live state does not report. Put generic gate mechanics and account limitations in the response to the user; keep them in the GitHub body only when naming a specific reader and concrete action.
+
 Do not hand a PR over as delivered while its current-head checks are unverified. The individual skills bound *how* to watch CI; this is about the sentence you end on. A final message that presents the work as done, with the pending-CI caveat placed after the deliverable or phrased as an intention ("CI is running and I'm watching it"), is read as a completed handoff — and it is worse than saying nothing, because a stated intention to verify sounds like verification. Either finish the bounded watch before reporting, or lead with the unfinished gate rather than trailing it. The same applies to every gate that is not yet satisfied: an unmet approval requirement, an unresolved thread, a queued run. Local checks passing is not the claim; the head's live state is.
 
 When a bounded watch legitimately expires with checks still queued or running, say which checks are pending and that the result is unknown — never that it is green.
