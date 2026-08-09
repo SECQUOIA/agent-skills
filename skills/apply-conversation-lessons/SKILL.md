@@ -11,15 +11,20 @@ Turn recent workflow friction into concise, durable skill updates. Prefer improv
 
 This skill cannot run automatically at every conversation end. Use it when the user invokes it or explicitly asks for a closing lessons-learned pass.
 
+Treat shared skills as stable by default. The normal successful result of this workflow is often **no skill change warranted**: prose churn is not evidence that the system is learning.
+
 ## Workflow
 
 1. Collect lessons.
    - Always infer candidate lessons from the current conversation when this skill is invoked.
    - If the user supplied lessons or requested a specific change, include that input alongside the inferred candidates.
    - Enumerate every skill used in the session, including this skill, and consider whether each has a durable lesson before narrowing to edits.
+   - When `scripts/encounter_ledger.py` is present, run `python <this-skill>/scripts/encounter_ledger.py report` before triage. Its default report requires three independent violation episodes in 30 days and combines Codex and Claude events from the same local ledger. Treat the report as recurrence evidence, not permission to edit.
    - Ask a follow-up only when a likely edit would be risky or ambiguous. Do not invent user preferences as facts.
 
 2. Triage each lesson.
+   - For a mature shared skill, require one of these before editing: the user explicitly requested this exact durable change; a missing safeguard could cause destructive action, security exposure, data loss, or an incorrect external write; or the same failure appears in at least three independent workflow episodes while the relevant rule version was already installed. A retry, several attempts in one conversation, or switching agents on the same target is one episode. Otherwise report or queue the candidate without editing.
+   - Crossing the recurrence threshold makes a candidate eligible for judgment; it does not make an edit automatic. Inspect the recorded skill revisions and outcomes. A repeatedly `prevented` mistake usually proves the guard is working, while an `escaped` deterministic mistake calls for enforcement rather than another prose synonym.
    - Keep lessons that are reusable, procedural, and likely to prevent repeated friction.
    - Drop one-off project facts, transient tool outputs, personal notes, and broad style preferences already covered by system instructions.
    - Apply a cost test before keeping: a lesson earns its bytes only when missing it produces a confidently wrong outcome — a plausible-but-wrong result, silent damage, an improvised "fix" that makes things worse — or repeated expensive rediscovery. A miss whose failure is immediate and legible (a command erroring with a clear message and an obvious correction) self-corrects at runtime; drop it, since encoding it taxes every future read of the skill without preventing anything.
