@@ -36,6 +36,7 @@ Follow the shared **gh-workflow-conventions** (read the sibling `gh-workflow-con
    - If none exists, create one against the default branch: `gh pr create --base <default> --head <branch> --title "learnings: <short summary>" --body-file <body_file>`.
    - If one exists, the push already updated it; refresh the body with `gh pr edit --body-file <body_file>` only if it is stale. Do not open a duplicate.
    - Build the title and body from the commits since the default branch (`git log origin/<default>..HEAD --oneline` and the diff `--stat`). The body should list, per skill touched, what changed and why, so the reviewer can assess each learning independently. Write it to a body file and pass it with `--body-file`.
+   - When the branch restructures a shared skill — splitting sections into `references/` files, renaming or moving files other contributors also edit — call that out in its own labeled paragraph at the top of the body. Sibling contributors' in-flight learnings branches still editing the old layout will conflict on rebase, so the reviewer should know to prioritize landing the restructure and to prompt other contributors to sync; state which files moved where so their conflict resolution is mechanical.
 
 4. Report and hand off.
    - Do not review or merge. Report the PR URL, the branch, the skills touched, and the commit summaries.
