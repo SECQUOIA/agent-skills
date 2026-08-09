@@ -1,0 +1,4 @@
+interface:
+  display_name: "Explain PR"
+  short_description: "Explain what a PR does"
+  default_prompt: "Use $explain-pr-to-me <PR-number-or-url> to explain a pull request technically and in plain language."
