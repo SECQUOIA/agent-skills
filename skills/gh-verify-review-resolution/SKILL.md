@@ -1,13 +1,13 @@
 ---
 name: gh-verify-review-resolution
-description: Verify whether latest PR changes adequately address existing GitHub review comments without making changes. Use for verification-only passes, review-resolution checks, "did this address the comments?", deciding whether another review round is justified, or terse invocations like `$gh-verify-review-resolution 154` / `$gh-verify-review-resolution this PR`. Uses the gh CLI for every GitHub interaction, reads reviewThreads with GraphQL for isResolved state, performs no writes, classifies each comment as addressed, partially addressed, not addressed, or not applicable, flags declined Blocking comments, caps non-converging loops, and returns the required assessment sections.
+description: Verify whether latest PR changes adequately address existing GitHub review comments or a user-referenced review report/checklist without making changes. Use for verification-only passes, review-resolution checks, "did this address the comments/report?", deciding whether another review round is justified, or terse invocations like `$gh-verify-review-resolution 154` / `$gh-verify-review-resolution this PR`. Uses the gh CLI for every GitHub interaction, reads reviewThreads with GraphQL for isResolved state, performs no writes, classifies each finding as addressed, partially addressed, not addressed, or not applicable, flags declined Blocking comments, caps non-converging loops, and returns the required assessment sections.
 ---
 
 # GitHub Verify Review Resolution
 
 ## Overview
 
-Use this workflow to check whether PR updates addressed existing review comments. It is read-only by default; only the explicit bounded close-out exception below permits GitHub state changes.
+Use this workflow to check whether PR updates addressed existing review comments or a user-referenced source report/checklist. It is read-only by default; only the explicit bounded close-out exception below permits GitHub state changes.
 
 Follow the shared **gh-workflow-conventions** (read the sibling `gh-workflow-conventions/SKILL.md`): gh-only tooling and `--json` fallback, PR/repository resolution across remotes, terse invocation shorthand, untrusted-text handling, bounded watches, and concise tone. The Read-Only Rules below override any convention that would write, push, or change checkout state. This file covers only what is specific to verifying review resolution.
 
