@@ -4,8 +4,10 @@
 # Usage:
 #   ./install.sh                         # symlink skills into both tools
 #   ./install.sh --copy                  # copy skills instead of symlinking
-#   ./install.sh --codex-hooks           # also install encounter hooks in audit mode
-#   ./install.sh --codex-hooks=enforce   # install encounter hooks in enforcement mode
+#   ./install.sh --codex-hooks           # also install Codex encounter hooks in audit mode
+#   ./install.sh --codex-hooks=enforce   # Codex encounter hooks in enforcement mode
+#   ./install.sh --claude-hooks          # also install Claude Code encounter hooks in audit mode
+#   ./install.sh --claude-hooks=enforce  # Claude Code encounter hooks in enforcement mode
 #
 # The skills reference each other by relative sibling paths, so they must be
 # installed together. This script installs the whole set into each tool's skills dir.
@@ -13,6 +15,7 @@ set -euo pipefail
 
 MODE="symlink"
 CODEX_HOOKS_MODE=""
+CLAUDE_HOOKS_MODE=""
 for argument in "$@"; do
   case "$argument" in
     --copy)
@@ -23,6 +26,12 @@ for argument in "$@"; do
       ;;
     --codex-hooks=audit|--codex-hooks=enforce)
       CODEX_HOOKS_MODE="${argument#*=}"
+      ;;
+    --claude-hooks)
+      CLAUDE_HOOKS_MODE="audit"
+      ;;
+    --claude-hooks=audit|--claude-hooks=enforce)
+      CLAUDE_HOOKS_MODE="${argument#*=}"
       ;;
     *)
       echo "Unknown option: $argument" >&2
@@ -74,6 +83,14 @@ if [ -n "$CODEX_HOOKS_MODE" ]; then
     --mode "$CODEX_HOOKS_MODE"
 fi
 
+if [ -n "$CLAUDE_HOOKS_MODE" ]; then
+  CLAUDE_ENCOUNTER_SCRIPT="$HOME/.claude/skills/apply-conversation-lessons/scripts/encounter_ledger.py"
+  python3 "$CLAUDE_ENCOUNTER_SCRIPT" install-claude-hooks \
+    --settings-path "$HOME/.claude/settings.json" \
+    --script "$CLAUDE_ENCOUNTER_SCRIPT" \
+    --mode "$CLAUDE_HOOKS_MODE"
+fi
+
 # Install the pre-push guard into this clone (blocks accidental pushes to main;
 # this repo is private on a free plan, so GitHub branch protection is unavailable).
 if [ -d "$REPO_DIR/.git" ] && [ -f "$REPO_DIR/hooks/pre-push" ]; then
@@ -88,4 +105,7 @@ echo "Done. Start a fresh Codex/Claude session to pick up the skills."
 echo "Update later with: git -C \"$REPO_DIR\" pull"
 if [ -n "$CODEX_HOOKS_MODE" ]; then
   echo "In Codex, open /hooks once to review and trust the installed hook definition."
+fi
+if [ -n "$CLAUDE_HOOKS_MODE" ]; then
+  echo "Claude Code reads hooks from settings.json at session start; restart open sessions to pick them up."
 fi

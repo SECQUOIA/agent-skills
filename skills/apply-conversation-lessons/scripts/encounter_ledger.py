@@ -856,10 +856,11 @@ def _atomic_json_write(path: Path, document: dict[str, Any]) -> None:
         prefix=f".{path.name}.", dir=path.parent
     )
     try:
+        mode = path.stat().st_mode & 0o777 if path.exists() else 0o600
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(document, handle, indent=2, sort_keys=False)
             handle.write("\n")
-        os.chmod(temporary_name, 0o600)
+        os.chmod(temporary_name, mode)
         os.replace(temporary_name, path)
     except BaseException:
         try:
@@ -869,9 +870,9 @@ def _atomic_json_write(path: Path, document: dict[str, Any]) -> None:
         raise
 
 
-def _load_hooks(path: Path) -> dict[str, Any]:
+def _load_hook_document(path: Path, default: dict[str, Any]) -> dict[str, Any]:
     if not path.exists():
-        return {"description": "User lifecycle hooks.", "hooks": {}}
+        return default
     with path.open(encoding="utf-8") as handle:
         document = json.load(handle)
     if not isinstance(document, dict):
@@ -880,6 +881,12 @@ def _load_hooks(path: Path) -> dict[str, Any]:
     if not isinstance(hooks, dict):
         raise ValueError(f"{path}: 'hooks' must be a JSON object")
     return document
+
+
+def _load_hooks(path: Path) -> dict[str, Any]:
+    return _load_hook_document(
+        path, {"description": "User lifecycle hooks.", "hooks": {}}
+    )
 
 
 def _backup_if_present(path: Path) -> Path | None:
@@ -921,6 +928,47 @@ def install_codex_hooks(
     backup = _backup_if_present(hooks_path)
     _atomic_json_write(hooks_path, document)
     return hooks_path, backup
+
+
+def install_claude_hooks(
+    settings_path: Path, script: Path, mode: str
+) -> tuple[Path, Path | None]:
+    # Claude Code reads lifecycle hooks from settings.json alongside unrelated
+    # user settings, so only the "hooks" key may change. Handlers omit the
+    # Codex-only statusMessage field; the timeout is in seconds for both tools.
+    document = _load_hook_document(settings_path, {"hooks": {}})
+    _remove_owned_hooks(document)
+    command = (
+        f"/usr/bin/python3 {shlex.quote(str(script))} hook --agent claude "
+        f"--mode {mode} --installation-id {INSTALLATION_ID}"
+    )
+    handler = {"type": "command", "command": command, "timeout": 5}
+    hooks = document["hooks"]
+    for event in ("PreToolUse", "PostToolUse"):
+        hooks.setdefault(event, []).append(
+            {"matcher": "Bash", "hooks": [dict(handler)]}
+        )
+    hooks.setdefault("Stop", []).append({"hooks": [dict(handler)]})
+    rendered = json.dumps(document, indent=2, sort_keys=False) + "\n"
+    if settings_path.exists() and settings_path.read_text(encoding="utf-8") == rendered:
+        return settings_path, None
+    backup = _backup_if_present(settings_path)
+    _atomic_json_write(settings_path, document)
+    return settings_path, backup
+
+
+def uninstall_claude_hooks(settings_path: Path) -> tuple[Path, Path | None, bool]:
+    if not settings_path.exists():
+        return settings_path, None, False
+    document = _load_hook_document(settings_path, {"hooks": {}})
+    changed = _remove_owned_hooks(document)
+    if not changed:
+        return settings_path, None, False
+    if document.get("hooks") == {}:
+        del document["hooks"]
+    backup = _backup_if_present(settings_path)
+    _atomic_json_write(settings_path, document)
+    return settings_path, backup, True
 
 
 def uninstall_codex_hooks(codex_home: Path) -> tuple[Path, Path | None, bool]:
@@ -1074,6 +1122,46 @@ def build_parser() -> argparse.ArgumentParser:
         return 0
 
     uninstall.set_defaults(function=command_uninstall)
+
+    claude_install = subparsers.add_parser(
+        "install-claude-hooks", help="merge Claude Code hook handlers"
+    )
+    claude_install.add_argument(
+        "--settings-path",
+        type=Path,
+        default=Path.home() / ".claude" / "settings.json",
+    )
+    claude_install.add_argument("--script", type=Path, default=Path(__file__).resolve())
+    claude_install.add_argument("--mode", choices=("audit", "enforce"), default="audit")
+
+    def command_install_claude(args: argparse.Namespace) -> int:
+        path, backup = install_claude_hooks(args.settings_path, args.script, args.mode)
+        message = f"Installed Claude encounter hooks in {path} ({args.mode} mode)."
+        if backup:
+            message += f" Previous file backed up to {backup}."
+        print(message)
+        return 0
+
+    claude_install.set_defaults(function=command_install_claude)
+
+    claude_uninstall = subparsers.add_parser(
+        "uninstall-claude-hooks", help="remove owned Claude Code handlers"
+    )
+    claude_uninstall.add_argument(
+        "--settings-path",
+        type=Path,
+        default=Path.home() / ".claude" / "settings.json",
+    )
+
+    def command_uninstall_claude(args: argparse.Namespace) -> int:
+        path, backup, changed = uninstall_claude_hooks(args.settings_path)
+        if changed:
+            print(f"Removed Claude encounter hooks from {path}; backup: {backup}.")
+        else:
+            print(f"No SECQUOIA encounter hooks found in {path}.")
+        return 0
+
+    claude_uninstall.set_defaults(function=command_uninstall_claude)
     return parser
 
 

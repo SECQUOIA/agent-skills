@@ -45,13 +45,14 @@ Start a fresh Codex or Claude session and the skills appear (e.g. `/gh-review-pr
 
 ### Optional deterministic hooks
 
-Install the shared encounter guard for Codex in audit mode:
+Install the shared encounter guard in audit mode for Codex, Claude Code, or both:
 
 ```bash
 ./install.sh --codex-hooks
+./install.sh --claude-hooks
 ```
 
-The installer merges three owned handlers into `~/.codex/hooks.json` without replacing unrelated hooks. In Codex, open `/hooks` once to review and trust the definition. Audit mode reports and counts violations but does not block tool calls or prevent a turn from ending. After reviewing the audit results, opt into enforcement with `./install.sh --codex-hooks=enforce`.
+The Codex installer merges three owned handlers into `~/.codex/hooks.json`, and the Claude installer merges the same three handlers into the `hooks` key of `~/.claude/settings.json`; neither replaces unrelated hooks or settings, both back up the previous file before changing it, and rerunning either is a no-op. In Codex, open `/hooks` once to review and trust the definition; Claude Code snapshots hooks at session start, so restart open sessions. Audit mode reports and counts violations but does not block tool calls or prevent a turn from ending. After reviewing the audit results, opt into enforcement with `./install.sh --codex-hooks=enforce` or `./install.sh --claude-hooks=enforce`. `./uninstall.sh` removes the owned handlers from both files.
 
 The guard currently checks two existing `gh-workflow-conventions` invariants: use a separate successful live-state read before a GitHub write, and perform a separate readback afterward. Encounters are deduplicated by rule and workflow target over 24 hours, so retries and an agent switch on the same task count once. The local SQLite ledger contains rule IDs, workflow labels, agent names, outcomes, timestamps, and skill revisions; it never stores prompts or transcripts. It defaults to `~/.local/state/secquoia-agent-skills/encounters.sqlite3` (or `$XDG_STATE_HOME/secquoia-agent-skills/encounters.sqlite3`).
 
@@ -61,7 +62,7 @@ Inspect candidates that reached the default recurrence threshold:
 python ~/.codex/skills/apply-conversation-lessons/scripts/encounter_ledger.py report
 ```
 
-The runner is agent-neutral. A Claude hook can invoke the same installed script with `hook --agent claude --mode audit` and send the usual lifecycle JSON on standard input; both adapters then use the same ledger. The repository installer intentionally configures only Codex for now so Claude-specific settings can be reviewed separately.
+The runner is agent-neutral: both installers point their handlers at the same installed script (`hook --agent codex|claude --mode audit`) and both agents write to the same local ledger, so retries and agent switches on one task dedupe into a single episode.
 
 ## Update
 

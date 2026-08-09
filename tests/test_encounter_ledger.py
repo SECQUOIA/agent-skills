@@ -342,5 +342,247 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertEqual(remaining, ["python3 other.py"])
 
 
+def claude_payload(event: str, command: str = "", response=None, **extra):
+    """A payload in the exact shape Claude Code v2.1.x sends: no turn_id, and
+    Bash tool_response carries stdout/stderr without an exit code (PostToolUse
+    only fires for successful tool calls)."""
+    payload = {
+        "session_id": "claude-session-1",
+        "transcript_path": "/tmp/transcript.jsonl",
+        "cwd": "/tmp",
+        "permission_mode": "acceptEdits",
+        "hook_event_name": event,
+    }
+    if command:
+        payload.update(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": command, "description": "run"},
+                "tool_use_id": "toolu_0123",
+            }
+        )
+    if response is not None:
+        payload["tool_response"] = response
+        payload["duration_ms"] = 10
+    payload.update(extra)
+    return payload
+
+
+CLAUDE_BASH_OK = {
+    "stdout": "output",
+    "stderr": "",
+    "interrupted": False,
+    "isImage": False,
+    "noOutputExpected": False,
+}
+
+
+class ClaudeHookTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.state_dir = self.temporary.name
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def run_hook(self, payload, mode="audit"):
+        return ledger.run_hook(
+            payload,
+            agent="claude",
+            mode=mode,
+            explicit_state_dir=self.state_dir,
+        )
+
+    def test_claude_shapes_audit_flow_records_agent_and_never_blocks(self):
+        write = "gh pr comment 11 --repo owner/repo --body done"
+        pre = self.run_hook(claude_payload("PreToolUse", write))
+        self.assertIn("additionalContext", pre["hookSpecificOutput"])
+        self.assertNotIn("permissionDecision", pre["hookSpecificOutput"])
+
+        self.run_hook(claude_payload("PostToolUse", write, CLAUDE_BASH_OK))
+        stop = self.run_hook(claude_payload("Stop", stop_hook_active=False))
+        self.assertNotIn("decision", stop)
+        self.assertIn("systemMessage", stop)
+
+        connection = ledger.connect_database(self.state_dir)
+        try:
+            rows = connection.execute("SELECT * FROM encounters").fetchall()
+        finally:
+            connection.close()
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(row["last_agent"], "claude")
+            self.assertNotEqual(row["last_skill_revision"], "")
+
+    def test_claude_shapes_satisfy_rules_with_successful_reads(self):
+        read = "gh pr view 11 --repo owner/repo --json state"
+        write = "gh pr comment 11 --repo owner/repo --body done"
+        self.run_hook(claude_payload("PostToolUse", read, CLAUDE_BASH_OK))
+        self.assertIsNone(self.run_hook(claude_payload("PreToolUse", write)))
+        self.run_hook(claude_payload("PostToolUse", write, CLAUDE_BASH_OK))
+        self.run_hook(claude_payload("PostToolUse", read, CLAUDE_BASH_OK))
+        stop = self.run_hook(claude_payload("Stop", stop_hook_active=False))
+        self.assertEqual(stop, {})
+
+    def test_claude_enforcement_denies_and_respects_stop_reentry(self):
+        write = "gh issue comment 12 --repo owner/repo --body done"
+        denied = self.run_hook(claude_payload("PreToolUse", write), mode="enforce")
+        self.assertEqual(
+            denied["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+        self.run_hook(
+            claude_payload("PostToolUse", write, CLAUDE_BASH_OK), mode="enforce"
+        )
+        stop = self.run_hook(
+            claude_payload("Stop", stop_hook_active=False), mode="enforce"
+        )
+        self.assertEqual(stop["decision"], "block")
+        reentry = self.run_hook(
+            claude_payload("Stop", stop_hook_active=True), mode="enforce"
+        )
+        self.assertNotIn("decision", reentry)
+
+    def test_claude_and_codex_share_one_ledger_episode(self):
+        write = "gh pr comment 11 --repo owner/repo --body done"
+        self.run_hook(claude_payload("PreToolUse", write))
+        ledger.run_hook(
+            {
+                "session_id": "codex-session",
+                "turn_id": "turn-9",
+                "cwd": "/tmp",
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "tool_input": {"command": write},
+            },
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        connection = ledger.connect_database(self.state_dir)
+        try:
+            rows = connection.execute(
+                "SELECT * FROM encounters WHERE rule_id='GH-LIVE-STATE-001'"
+            ).fetchall()
+        finally:
+            connection.close()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["attempts"], 2)
+        self.assertEqual(json.loads(rows[0]["agents_json"]), ["claude", "codex"])
+
+
+class ClaudeInstallTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.settings_path = Path(self.temporary.name) / "settings.json"
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def existing_settings(self):
+        return {
+            "model": "opus",
+            "permissions": {"allow": ["Bash(git status:*)"], "deny": []},
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": "python3 other.py"}],
+                    }
+                ]
+            },
+        }
+
+    def owned_handlers(self, document):
+        return [
+            handler
+            for groups in document.get("hooks", {}).values()
+            for group in groups
+            for handler in group["hooks"]
+            if ledger.INSTALLATION_ID in handler.get("command", "")
+        ]
+
+    def test_install_is_idempotent_and_preserves_unrelated_settings(self):
+        self.settings_path.write_text(
+            json.dumps(self.existing_settings()), encoding="utf-8"
+        )
+        script = Path("/opt/secquoia/encounter ledger.py")
+        _, first_backup = ledger.install_claude_hooks(
+            self.settings_path, script, "audit"
+        )
+        self.assertIsNotNone(first_backup)
+        self.assertTrue(first_backup.exists())
+        _, second_backup = ledger.install_claude_hooks(
+            self.settings_path, script, "audit"
+        )
+        self.assertIsNone(second_backup)
+
+        document = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        self.assertEqual(document["model"], "opus")
+        self.assertEqual(
+            document["permissions"], self.existing_settings()["permissions"]
+        )
+        owned = self.owned_handlers(document)
+        self.assertEqual(len(owned), 3)
+        for handler in owned:
+            self.assertIn("--agent claude", handler["command"])
+            self.assertIn("--mode audit", handler["command"])
+            self.assertIn("'/opt/secquoia/encounter ledger.py'", handler["command"])
+            self.assertNotIn("statusMessage", handler)
+        unowned = [
+            handler["command"]
+            for groups in document["hooks"].values()
+            for group in groups
+            for handler in group["hooks"]
+            if ledger.INSTALLATION_ID not in handler.get("command", "")
+        ]
+        self.assertEqual(unowned, ["python3 other.py"])
+        for event in ("PreToolUse", "PostToolUse"):
+            matchers = [
+                group.get("matcher")
+                for group in document["hooks"][event]
+                for handler in group["hooks"]
+                if ledger.INSTALLATION_ID in handler.get("command", "")
+            ]
+            self.assertEqual(matchers, ["Bash"])
+
+    def test_install_creates_settings_file_when_missing(self):
+        path, backup = ledger.install_claude_hooks(
+            self.settings_path, Path("/opt/ledger.py"), "audit"
+        )
+        self.assertIsNone(backup)
+        document = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(len(self.owned_handlers(document)), 3)
+
+    def test_uninstall_removes_only_owned_handlers(self):
+        self.settings_path.write_text(
+            json.dumps(self.existing_settings()), encoding="utf-8"
+        )
+        ledger.install_claude_hooks(self.settings_path, Path("/opt/ledger.py"), "audit")
+        _, backup, changed = ledger.uninstall_claude_hooks(self.settings_path)
+        self.assertTrue(changed)
+        self.assertTrue(backup.exists())
+        document = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        self.assertEqual(self.owned_handlers(document), [])
+        self.assertEqual(document["model"], "opus")
+        remaining = [
+            handler["command"]
+            for groups in document["hooks"].values()
+            for group in groups
+            for handler in group["hooks"]
+        ]
+        self.assertEqual(remaining, ["python3 other.py"])
+
+        _, _, changed_again = ledger.uninstall_claude_hooks(self.settings_path)
+        self.assertFalse(changed_again)
+
+    def test_install_preserves_existing_file_mode(self):
+        self.settings_path.write_text(
+            json.dumps(self.existing_settings()), encoding="utf-8"
+        )
+        self.settings_path.chmod(0o644)
+        ledger.install_claude_hooks(self.settings_path, Path("/opt/ledger.py"), "audit")
+        self.assertEqual(self.settings_path.stat().st_mode & 0o777, 0o644)
+
+
 if __name__ == "__main__":
     unittest.main()
