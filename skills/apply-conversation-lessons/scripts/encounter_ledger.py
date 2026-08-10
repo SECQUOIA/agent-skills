@@ -741,16 +741,110 @@ def _command_substitutions(command: str) -> Iterable[str]:
         index += 1
 
 
+# Wrappers that execute their command argument unchanged. Each maps to
+# (value_options, positional_operands): options that consume the next token,
+# and how many positional operands precede the wrapped command. Unknown dash
+# options are skipped alone; a wrapper missing a required operand does not
+# parse, so its prefix stays non-executable.
+EXEC_THROUGH_WRAPPERS = {
+    "ionice": ({"-c", "-n", "--class", "--classdata"}, 0),
+    "nice": ({"-n", "--adjustment"}, 0),
+    "nohup": (set(), 0),
+    "setsid": (set(), 0),
+    "stdbuf": ({"-e", "-i", "-o", "--error", "--input", "--output"}, 0),
+    "sudo": ({"-C", "-D", "-T", "-U", "-g", "-h", "-p", "-r", "-t", "-u"}, 0),
+    "timeout": ({"-k", "-s", "--kill-after", "--signal"}, 1),
+}
+
+# xargs appends stdin-derived arguments, so a direct `xargs gh ...` command is
+# incomplete and stays untracked; a shell-wrapped `xargs bash -c 'gh ...'`
+# carries its full gh command inline and is scanned.
+SHELL_ONLY_EXEC_WRAPPERS = {
+    "xargs": (
+        {
+            "-E",
+            "-I",
+            "-L",
+            "-P",
+            "-a",
+            "-d",
+            "-i",
+            "-l",
+            "-n",
+            "-s",
+            "--arg-file",
+            "--delimiter",
+            "--eof",
+            "--max-args",
+            "--max-chars",
+            "--max-lines",
+            "--max-procs",
+            "--replace",
+        },
+        0,
+    ),
+}
+
+
+def _consume_exec_wrapper(
+    tokens: list[str], grammars: dict[str, tuple[set[str], int]]
+) -> int | None:
+    """Return how many tokens the wrapper at tokens[0] spans, or None."""
+    grammar = grammars.get(Path(tokens[0]).name)
+    if grammar is None:
+        return None
+    value_options, pending_operands = grammar
+    index = 1
+    options_done = False
+    while index < len(tokens):
+        token = tokens[index]
+        if not options_done and token == "--":
+            options_done = True
+            index += 1
+            continue
+        if not options_done and token.startswith("-") and token != "-":
+            if token in value_options:
+                index += 2
+                continue
+            if any(
+                option.startswith("--") and token.startswith(f"{option}=")
+                for option in value_options
+            ):
+                index += 1
+                continue
+            if any(
+                len(option) == 2 and token.startswith(option) and token != option
+                for option in value_options
+            ):
+                index += 1
+                continue
+            index += 1
+            continue
+        if pending_operands:
+            pending_operands -= 1
+            index += 1
+            continue
+        break
+    return None if pending_operands else index
+
+
 def _inline_environment(prefix: list[str]) -> tuple[dict[str, str], bool]:
     remaining = list(prefix)
     if remaining and remaining[0] in {"command", "env", "exec"}:
         remaining.pop(0)
     environment: dict[str, str] = {}
-    for token in remaining:
+    index = 0
+    while index < len(remaining):
+        token = remaining[index]
         match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", token, re.S)
-        if not match:
+        if match:
+            environment[match.group(1)] = match.group(2)
+            index += 1
+            continue
+        consumed = _consume_exec_wrapper(remaining[index:], EXEC_THROUGH_WRAPPERS)
+        if consumed is None:
             return {}, False
-        environment[match.group(1)] = match.group(2)
+        index += consumed
     return environment, True
 
 
@@ -945,81 +1039,91 @@ def _shell_command_argument(tokens: list[str], shell_index: int) -> str | None:
 
 def _inline_shell_environment(prefix: list[_ShellWord]) -> bool:
     remaining = list(prefix)
-    while remaining and remaining[0].assignment:
-        remaining.pop(0)
-    if not remaining:
-        return True
+    while True:
+        while remaining and remaining[0].assignment:
+            remaining.pop(0)
+        if not remaining:
+            return True
 
-    wrapper = Path(remaining.pop(0).value).name
-    if wrapper == "env":
-        value_options = {
-            "-C",
-            "-u",
-            "--block-signal",
-            "--chdir",
-            "--default-signal",
-            "--ignore-signal",
-            "--unset",
-        }
-        boolean_options = {
-            "-0",
-            "-i",
-            "-v",
-            "--debug",
-            "--ignore-environment",
-            "--null",
-        }
-        while remaining:
-            token = remaining[0].value
-            if token == "--":
-                remaining.pop(0)
+        wrapper = Path(remaining[0].value).name
+        if wrapper == "env":
+            remaining.pop(0)
+            value_options = {
+                "-C",
+                "-u",
+                "--block-signal",
+                "--chdir",
+                "--default-signal",
+                "--ignore-signal",
+                "--unset",
+            }
+            boolean_options = {
+                "-0",
+                "-i",
+                "-v",
+                "--debug",
+                "--ignore-environment",
+                "--null",
+            }
+            while remaining:
+                token = remaining[0].value
+                if token == "--":
+                    remaining.pop(0)
+                    break
+                if token in value_options:
+                    if len(remaining) < 2:
+                        return False
+                    del remaining[:2]
+                    continue
+                if (
+                    token in boolean_options
+                    or any(token.startswith(f"{option}=") for option in value_options)
+                    or (len(token) > 2 and token.startswith(("-C", "-u")))
+                ):
+                    remaining.pop(0)
+                    continue
                 break
-            if token in value_options:
-                if len(remaining) < 2:
-                    return False
-                del remaining[:2]
-                continue
-            if (
-                token in boolean_options
-                or any(token.startswith(f"{option}=") for option in value_options)
-                or (len(token) > 2 and token.startswith(("-C", "-u")))
+            # env sets NAME=value operands verbatim regardless of shell quoting.
+            while remaining and re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]*=.*", remaining[0].value, re.S
             ):
                 remaining.pop(0)
-                continue
-            break
-        return all(
-            re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", word.value, re.S) is not None
-            for word in remaining
-        )
+            continue
 
-    if wrapper == "command":
-        if any(word.value in {"-V", "-v"} for word in remaining):
-            return False
-        for index, word in enumerate(remaining):
-            if word.value == "--":
-                return index == len(remaining) - 1
-            if word.value != "-p":
-                return False
-        return True
-
-    if wrapper == "exec":
-        index = 0
-        while index < len(remaining):
-            token = remaining[index].value
-            if token == "--":
-                return index == len(remaining) - 1
-            if token == "-a":
-                if index + 1 >= len(remaining):
+        if wrapper == "command":
+            remaining.pop(0)
+            while remaining and remaining[0].value.startswith("-"):
+                token = remaining.pop(0).value
+                if token in {"-V", "-v"}:
                     return False
-                index += 2
-                continue
-            if token in {"-c", "-l"}:
-                index += 1
-                continue
-            return False
-        return True
+                if token == "--":
+                    break
+                if token != "-p":
+                    return False
+            continue
 
-    return False
+        if wrapper == "exec":
+            remaining.pop(0)
+            while remaining and remaining[0].value.startswith("-"):
+                token = remaining.pop(0).value
+                if token == "--":
+                    break
+                if token == "-a":
+                    if not remaining:
+                        return False
+                    remaining.pop(0)
+                    continue
+                if token not in {"-c", "-l"}:
+                    return False
+            continue
+
+        consumed = _consume_exec_wrapper(
+            [word.value for word in remaining],
+            EXEC_THROUGH_WRAPPERS | SHELL_ONLY_EXEC_WRAPPERS,
+        )
+        if consumed is None:
+            return False
+        del remaining[:consumed]
 
 
 def _executable_shell_position(words: list[_ShellWord], shell_index: int) -> bool:

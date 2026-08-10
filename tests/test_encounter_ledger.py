@@ -394,6 +394,67 @@ class EncounterLedgerTests(unittest.TestCase):
             with self.subTest(harmless=harmless):
                 self.assertEqual(ledger.classify_gh_operations(harmless, "/tmp"), [])
 
+    def test_exec_through_wrappers_expose_shell_wrapped_writes(self):
+        write = "gh pr comment 11 --repo owner/repo --body done"
+        for command in (
+            f"timeout 5 bash -c '{write}'",
+            f"timeout -k 3 300 bash -c '{write}'",
+            f"xargs -0 bash -c '{write}'",
+            f"xargs -I{{}} bash -c '{write}'",
+            f"nice -n 10 bash -c '{write}'",
+            f"nice -10 bash -c '{write}'",
+            f"nohup bash -c '{write}'",
+            f"stdbuf -oL bash -c '{write}'",
+            f"sudo -u deploy bash -c '{write}'",
+            f"env A=B timeout 5 bash -c '{write}'",
+            f"A=B sudo -u deploy timeout 5 bash -c '{write}'",
+        ):
+            with self.subTest(command=command):
+                operations = ledger.classify_gh_operations(command, "/tmp")
+                self.assertEqual([op.kind for op in operations], ["write"])
+                self.assertEqual(operations[0].workflow_label, "owner/repo#11")
+
+        # Quoting a command name does not change what executes.
+        quoted = f"'timeout' 5 bash -c '{write}'"
+        self.assertEqual(
+            [op.kind for op in ledger.classify_gh_operations(quoted, "/tmp")],
+            ["write"],
+        )
+
+        for harmless in (
+            f"echo timeout 5 bash -c '{write}'",
+            f"timeout bash -c '{write}'",
+        ):
+            with self.subTest(harmless=harmless):
+                self.assertEqual(ledger.classify_gh_operations(harmless, "/tmp"), [])
+
+    def test_exec_through_wrappers_expose_direct_gh_operations(self):
+        for command, expected in (
+            ("timeout 300 gh pr comment 11 --repo owner/repo --body done", "write"),
+            ("sudo -u deploy gh pr merge 11 --repo owner/repo", "write"),
+            ("nice -n 10 gh pr view 11 --repo owner/repo --json state", "read"),
+            ("stdbuf -oL gh run view 12345 --repo owner/repo", "read"),
+        ):
+            with self.subTest(command=command):
+                operations = ledger.classify_gh_operations(command, "/tmp")
+                self.assertEqual([op.kind for op in operations], [expected])
+
+        read = "timeout 5 gh pr view 11 --repo owner/repo --json state"
+        self.assertTrue(ledger.classify_gh_operations(read, "/tmp")[0].read_eligible)
+
+        env_read = "GH_REPO=owner/repo timeout 5 gh pr view 11 --json state"
+        operation = ledger.classify_gh_operations(env_read, "/tmp")[0]
+        self.assertEqual(operation.workflow_label, "owner/repo#11")
+
+        # xargs appends stdin-derived arguments, so the visible direct command
+        # is incomplete and must stay untracked.
+        self.assertEqual(
+            ledger.classify_gh_operations(
+                "xargs gh pr comment 11 --repo owner/repo --body done", "/tmp"
+            ),
+            [],
+        )
+
     def test_graphql_number_targets_do_not_bridge_to_cli_prs(self):
         bound_query = Path(self.temporary.name) / "bound-pr.graphql"
         bound_query.write_text(
