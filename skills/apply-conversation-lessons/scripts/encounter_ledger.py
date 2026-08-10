@@ -32,6 +32,7 @@ DEFAULT_REPORT_DAYS = 30
 DEFAULT_MIN_ENCOUNTERS = 3
 HOOK_STATE_RETENTION_DAYS = 30
 MAX_NESTED_SHELL_DEPTH = 32
+MAX_TOOL_RESPONSE_SCAN_CHARS = 32_000
 OUTCOME_RANK = {"passed": 0, "prevented": 1, "escaped": 2}
 
 RULES = {
@@ -307,8 +308,9 @@ def _migrate_legacy_hook_state(connection: sqlite3.Connection) -> None:
             """
             INSERT INTO hook_activity (
                 session_id, turn_id, workflow_key, workflow_label, repo_key,
-                preflight_seen, pending_write, pending_summary, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                preflight_seen, pending_write, pending_count, pending_summary,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id, turn_id, workflow_key) DO UPDATE SET
                 workflow_label = excluded.workflow_label,
                 repo_key = excluded.repo_key,
@@ -317,6 +319,9 @@ def _migrate_legacy_hook_state(connection: sqlite3.Connection) -> None:
                 ),
                 pending_write = MAX(
                     hook_activity.pending_write, excluded.pending_write
+                ),
+                pending_count = MAX(
+                    hook_activity.pending_count, excluded.pending_count
                 ),
                 pending_summary = CASE
                     WHEN excluded.pending_write = 1
@@ -333,6 +338,7 @@ def _migrate_legacy_hook_state(connection: sqlite3.Connection) -> None:
                 row["repo_key"],
                 row["preflight_seen"],
                 row["pending_write"],
+                row["pending_count"],
                 row["pending_summary"],
                 row["updated_at"],
             ),
@@ -392,6 +398,7 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
             repo_key TEXT NOT NULL,
             preflight_seen INTEGER NOT NULL DEFAULT 0,
             pending_write INTEGER NOT NULL DEFAULT 0,
+            pending_count INTEGER NOT NULL DEFAULT 0,
             pending_summary TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL,
             PRIMARY KEY (session_id, turn_id, workflow_key)
@@ -414,12 +421,34 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
         );
         CREATE INDEX IF NOT EXISTS hook_tools_turn
             ON hook_tools(session_id, turn_id);
+
+        CREATE TABLE IF NOT EXISTS hook_completed_tools (
+            session_id TEXT NOT NULL,
+            tool_use_id TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (session_id, tool_use_id)
+        );
         """
     )
+    with _write_transaction(connection):
+        activity_columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(hook_activity)").fetchall()
+        }
+        if "pending_count" not in activity_columns:
+            connection.execute(
+                "ALTER TABLE hook_activity "
+                "ADD COLUMN pending_count INTEGER NOT NULL DEFAULT 0"
+            )
     stale_cutoff = isoformat(utc_now() - timedelta(days=HOOK_STATE_RETENTION_DAYS))
     with _write_transaction(connection):
         _migrate_legacy_hook_state(connection)
-        for table in ("hook_activity", "hook_tools", "hook_sessions"):
+        for table in (
+            "hook_activity",
+            "hook_tools",
+            "hook_sessions",
+            "hook_completed_tools",
+        ):
             connection.execute(
                 f"DELETE FROM {table} WHERE updated_at < ?", (stale_cutoff,)
             )
@@ -2516,6 +2545,101 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
     return operations
 
 
+def _creation_group(operation: GhOperation) -> str | None:
+    for group in ("pr", "issue"):
+        if (
+            operation.summary == f"gh {group} create"
+            and operation.workflow_key == f"{operation.repo_key}:{group}:create"
+        ):
+            return group
+    return None
+
+
+def _creation_preflight(read: GhOperation) -> GhOperation | None:
+    for group in ("pr", "issue"):
+        suffix = f":{group}:list"
+        if read.summary != f"gh {group} list" or not read.workflow_label.endswith(
+            suffix
+        ):
+            continue
+        return GhOperation(
+            kind="read",
+            workflow_key=f"{read.repo_key}:{group}:create",
+            workflow_label=f"{read.workflow_label.removesuffix(suffix)}:{group}:create",
+            repo_key=read.repo_key,
+            summary=read.summary,
+            read_eligible=True,
+        )
+    return None
+
+
+def _bounded_tool_response_text(payload: dict[str, Any]) -> str:
+    """Return a bounded transient view of tool output; never persist it."""
+    stack: list[tuple[Any, int]] = [(payload.get("tool_response"), 0)]
+    fragments: list[str] = []
+    remaining = MAX_TOOL_RESPONSE_SCAN_CHARS
+    visited = 0
+    while stack and remaining > 0 and visited < 128:
+        value, depth = stack.pop()
+        visited += 1
+        if isinstance(value, str):
+            fragment = value[:remaining]
+            fragments.append(fragment)
+            remaining -= len(fragment)
+        elif depth < 4 and isinstance(value, dict):
+            for index, item in enumerate(value.values()):
+                if index >= 64:
+                    break
+                stack.append((item, depth + 1))
+        elif depth < 4 and isinstance(value, list):
+            stack.extend((item, depth + 1) for item in reversed(value[:64]))
+    return "\n".join(fragments)
+
+
+def _created_target_from_response(
+    payload: dict[str, Any], operation: GhOperation
+) -> GhOperation | None:
+    group = _creation_group(operation)
+    if group is None or not operation.repo_key.startswith("github:"):
+        return None
+    host_and_repo = operation.repo_key.removeprefix("github:")
+    if ":" not in host_and_repo:
+        return None
+    host, repo = host_and_repo.rsplit(":", 1)
+    if _dynamic_shell_value(host) or _dynamic_shell_value(repo) or "/" not in repo:
+        return None
+
+    text = _bounded_tool_response_text(payload).replace("\\/", "/")
+    urls = {
+        (url_host.lower(), owner.lower(), name.lower(), resource.lower(), number)
+        for url_host, owner, name, resource, number in re.findall(
+            r"https?://([^/\s\"'<>]+)/([^/\s\"'<>]+)/([^/\s\"'<>]+)"
+            r"/(pull|issues)/(\d+)(?=$|[/?#\s\"'<>])",
+            text,
+            flags=re.I,
+        )
+    }
+    if len(urls) != 1:
+        return None
+    url_host, owner, name, resource, number = next(iter(urls))
+    expected_resource = "pull" if group == "pr" else "issues"
+    expected_owner, expected_name = repo.lower().split("/", 1)
+    if (
+        url_host != host.lower()
+        or (owner, name) != (expected_owner, expected_name)
+        or resource != expected_resource
+    ):
+        return None
+    object_kind = "pull" if group == "pr" else "issue"
+    return GhOperation(
+        kind="write",
+        workflow_key=f"{operation.repo_key}:{object_kind}:number:{number}",
+        workflow_label=f"{repo}#{number}",
+        repo_key=operation.repo_key,
+        summary=operation.summary,
+    )
+
+
 def _activity(
     connection: sqlite3.Connection,
     session_id: str,
@@ -2575,6 +2699,83 @@ def _upsert_activity(
                 pending_summary,
             ),
         )
+
+
+def _increment_create_attempt(
+    connection: sqlite3.Connection,
+    *,
+    session_id: str,
+    turn_id: str,
+    operation: GhOperation,
+) -> None:
+    row = _activity(connection, session_id, turn_id, operation.workflow_key)
+    pending_count = int(row["pending_count"]) if row is not None else 0
+    if row is not None and row["pending_write"] and pending_count == 0:
+        # Rows created by an older runner predate pending_count. Treat a
+        # pending legacy create as one outstanding attempt before adding this
+        # one, so mixed-version operation cannot erase it.
+        pending_count = 1
+    _upsert_activity(
+        connection,
+        session_id=session_id,
+        turn_id=turn_id,
+        operation=operation,
+        preflight_seen=0,
+        pending_write=1,
+        pending_summary=operation.summary,
+    )
+    connection.execute(
+        """
+        UPDATE hook_activity
+        SET pending_count = ?, updated_at = ?
+        WHERE session_id = ? AND turn_id = ? AND workflow_key = ?
+        """,
+        (
+            pending_count + 1,
+            isoformat(utc_now()),
+            session_id,
+            turn_id,
+            operation.workflow_key,
+        ),
+    )
+
+
+def _consume_create_attempt(
+    connection: sqlite3.Connection,
+    *,
+    session_id: str,
+    turn_id: str,
+    operation: GhOperation,
+) -> None:
+    row = _activity(connection, session_id, turn_id, operation.workflow_key)
+    if row is None or not row["pending_write"]:
+        return
+    pending_count = int(row["pending_count"])
+    if pending_count <= 0:
+        pending_count = 1
+    if pending_count == 1:
+        connection.execute(
+            """
+            DELETE FROM hook_activity
+            WHERE session_id = ? AND turn_id = ? AND workflow_key = ?
+            """,
+            (session_id, turn_id, operation.workflow_key),
+        )
+        return
+    connection.execute(
+        """
+        UPDATE hook_activity
+        SET pending_count = ?, preflight_seen = 0, updated_at = ?
+        WHERE session_id = ? AND turn_id = ? AND workflow_key = ?
+        """,
+        (
+            pending_count - 1,
+            isoformat(utc_now()),
+            session_id,
+            turn_id,
+            operation.workflow_key,
+        ),
+    )
 
 
 def _pending_for_turn(
@@ -2810,6 +3011,39 @@ def _has_tool_mapping(connection: sqlite3.Connection, payload: dict[str, Any]) -
     )
 
 
+def _completed_tool_event(
+    connection: sqlite3.Connection, session_id: str, tool_use_id: str
+) -> bool:
+    if not tool_use_id:
+        return False
+    return (
+        connection.execute(
+            """
+            SELECT 1 FROM hook_completed_tools
+            WHERE session_id = ? AND tool_use_id = ?
+            """,
+            (session_id, tool_use_id),
+        ).fetchone()
+        is not None
+    )
+
+
+def _mark_tool_event_completed(
+    connection: sqlite3.Connection, session_id: str, tool_use_id: str
+) -> None:
+    if not tool_use_id:
+        return
+    connection.execute(
+        """
+        INSERT INTO hook_completed_tools (session_id, tool_use_id, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(session_id, tool_use_id) DO UPDATE SET
+            updated_at = excluded.updated_at
+        """,
+        (session_id, tool_use_id, isoformat(utc_now())),
+    )
+
+
 def _command_from_payload(payload: dict[str, Any]) -> str:
     tool_input = payload.get("tool_input") or {}
     if not isinstance(tool_input, dict):
@@ -2872,15 +3106,23 @@ def _pre_tool_use(
                         revision=revision,
                         detail="Separate live-state read observed before the write attempt.",
                     )
-                _upsert_activity(
-                    connection,
-                    session_id=session_id,
-                    turn_id=turn_id,
-                    operation=operation,
-                    preflight_seen=0,
-                    pending_write=1,
-                    pending_summary=operation.summary,
-                )
+                if _creation_group(operation) is not None:
+                    _increment_create_attempt(
+                        connection,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        operation=operation,
+                    )
+                else:
+                    _upsert_activity(
+                        connection,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        operation=operation,
+                        preflight_seen=0,
+                        pending_write=1,
+                        pending_summary=operation.summary,
+                    )
     if not violations:
         return None
     labels = ", ".join(sorted({operation.workflow_label for operation in violations}))
@@ -2918,33 +3160,72 @@ def _post_tool_use(
         if operation.kind == "read" and operation.read_eligible
     ]
     writes = [operation for operation in operations if operation.kind == "write"]
+    creation_writes = [write for write in writes if _creation_group(write) is not None]
     successful = _successful_response(payload, agent)
     revision = skill_revision() if successful and operations else ""
     with _write_transaction(connection):
         _migrate_legacy_hook_state(connection)
+        tool_use_id = _tool_use_id(payload)
+        if creation_writes and _completed_tool_event(
+            connection, session_id, tool_use_id
+        ):
+            _forget_tool(connection, payload)
+            return []
+        has_tool_mapping = _has_tool_mapping(connection, payload)
         correlated = (
             agent != "claude"
             or bool(payload.get("turn_id") or payload.get("prompt_id"))
-            or _has_tool_mapping(connection, payload)
+            or has_tool_mapping
         )
         turn_id = _turn_id(connection, payload)
         if not successful:
             for write in writes:
-                _upsert_activity(
-                    connection,
-                    session_id=session_id,
-                    turn_id=turn_id,
-                    operation=write,
-                    preflight_seen=0,
-                    pending_write=1,
-                    pending_summary=write.summary,
-                )
+                if _creation_group(write) is not None and not has_tool_mapping:
+                    _increment_create_attempt(
+                        connection,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        operation=write,
+                    )
+                else:
+                    _upsert_activity(
+                        connection,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        operation=write,
+                        preflight_seen=0,
+                        pending_write=1,
+                        pending_summary=write.summary,
+                    )
             labels = sorted({write.workflow_label for write in writes})
+            if creation_writes:
+                _mark_tool_event_completed(connection, session_id, tool_use_id)
             _forget_tool(connection, payload)
             return labels
 
         if not correlated:
             reads = []
+        resolved_writes = list(writes)
+        creation_indexes = [
+            index
+            for index, write in enumerate(writes)
+            if _creation_group(write) is not None
+        ]
+        if has_tool_mapping and len(creation_indexes) == 1:
+            create_index = creation_indexes[0]
+            resolved_writes[create_index] = (
+                _created_target_from_response(payload, writes[create_index])
+                or writes[create_index]
+            )
+        for original, resolved in zip(writes, resolved_writes, strict=True):
+            if original.workflow_key != resolved.workflow_key:
+                _consume_create_attempt(
+                    connection,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    operation=original,
+                )
+        writes = resolved_writes
         pending_before = (
             _pending_for_session(connection, session_id)
             if agent == "codex"
@@ -2958,6 +3239,24 @@ def _post_tool_use(
                 operation=read,
                 preflight_seen=1,
             )
+            create_preflight = _creation_preflight(read)
+            if create_preflight is not None:
+                pending_create = connection.execute(
+                    """
+                    SELECT 1 FROM hook_activity
+                    WHERE session_id = ? AND turn_id = ? AND workflow_key = ?
+                      AND pending_write = 1
+                    """,
+                    (session_id, turn_id, create_preflight.workflow_key),
+                ).fetchone()
+                if pending_create is None:
+                    _upsert_activity(
+                        connection,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        operation=create_preflight,
+                        preflight_seen=1,
+                    )
 
         for pending in pending_before:
             matching_read = next(
@@ -2996,15 +3295,25 @@ def _post_tool_use(
                 )
 
         for write in writes:
-            _upsert_activity(
-                connection,
-                session_id=session_id,
-                turn_id=turn_id,
-                operation=write,
-                preflight_seen=0,
-                pending_write=1,
-                pending_summary=write.summary,
-            )
+            if _creation_group(write) is not None and not has_tool_mapping:
+                _increment_create_attempt(
+                    connection,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    operation=write,
+                )
+            else:
+                _upsert_activity(
+                    connection,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    operation=write,
+                    preflight_seen=0,
+                    pending_write=1,
+                    pending_summary=write.summary,
+                )
+        if creation_writes:
+            _mark_tool_event_completed(connection, session_id, tool_use_id)
         _forget_tool(connection, payload)
         return []
 

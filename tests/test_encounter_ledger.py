@@ -1122,6 +1122,508 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertEqual(outcomes["GH-LIVE-STATE-001"], "passed")
         self.assertEqual(outcomes["GH-WRITE-READBACK-001"], "passed")
 
+    def test_pr_and_issue_create_rekey_to_the_returned_exact_target(self):
+        cases = (
+            ("pr", "pull", 19, "output"),
+            ("issue", "issues", 27, "nested"),
+        )
+        for group, resource, number, response_shape in cases:
+            with self.subTest(group=group):
+                state_dir = str(Path(self.state_dir) / f"create-{group}")
+                listing = f"gh {group} list --repo owner/repo --limit 20"
+                create = f"gh {group} create --repo owner/repo --title created"
+                readback = f"gh {group} view {number} --repo owner/repo --json state"
+                url = f"https://github.com/owner/repo/{resource}/{number}"
+                response = (
+                    {"exit_code": 0, "output": url}
+                    if response_shape == "output"
+                    else {"exit_code": 0, "result": {"stdout": url}}
+                )
+
+                ledger.run_hook(
+                    hook_payload("PostToolUse", listing, {"exit_code": 0}),
+                    agent="codex",
+                    mode="enforce",
+                    explicit_state_dir=state_dir,
+                )
+                self.assertIsNone(
+                    ledger.run_hook(
+                        hook_payload(
+                            "PreToolUse", create, tool_use_id=f"create-{group}"
+                        ),
+                        agent="codex",
+                        mode="enforce",
+                        explicit_state_dir=state_dir,
+                    )
+                )
+                ledger.run_hook(
+                    hook_payload(
+                        "PostToolUse",
+                        create,
+                        response,
+                        tool_use_id=f"create-{group}",
+                    ),
+                    agent="codex",
+                    mode="enforce",
+                    explicit_state_dir=state_dir,
+                )
+
+                connection = ledger.connect_database(state_dir)
+                try:
+                    pending = connection.execute(
+                        """
+                        SELECT workflow_label, workflow_key FROM hook_activity
+                        WHERE pending_write = 1
+                        """
+                    ).fetchall()
+                finally:
+                    connection.close()
+                self.assertEqual(
+                    [(row["workflow_label"], row["workflow_key"]) for row in pending],
+                    [
+                        (
+                            f"owner/repo#{number}",
+                            "github:github.com:owner/repo:"
+                            f"{'pull' if group == 'pr' else 'issue'}:number:{number}",
+                        )
+                    ],
+                )
+
+                ledger.run_hook(
+                    hook_payload("PostToolUse", readback, {"exit_code": 0}),
+                    agent="codex",
+                    mode="enforce",
+                    explicit_state_dir=state_dir,
+                )
+                self.assertEqual(
+                    ledger.run_hook(
+                        hook_payload("Stop"),
+                        agent="codex",
+                        mode="enforce",
+                        explicit_state_dir=state_dir,
+                    ),
+                    {},
+                )
+
+                connection = ledger.connect_database(state_dir)
+                try:
+                    outcomes = {
+                        (row["rule_id"], row["workflow_label"]): row["outcome"]
+                        for row in connection.execute("SELECT * FROM encounters")
+                    }
+                    persisted = "\n".join(
+                        str(value)
+                        for table in (
+                            "encounters",
+                            "hook_activity",
+                            "hook_sessions",
+                            "hook_tools",
+                            "hook_completed_tools",
+                        )
+                        for row in connection.execute(f"SELECT * FROM {table}")
+                        for value in row
+                    )
+                finally:
+                    connection.close()
+                self.assertEqual(
+                    outcomes[("GH-LIVE-STATE-001", f"owner/repo:{group}:create")],
+                    "passed",
+                )
+                self.assertEqual(
+                    outcomes[("GH-WRITE-READBACK-001", f"owner/repo#{number}")],
+                    "passed",
+                )
+                self.assertNotIn(url, persisted)
+                self.assertNotIn(f"create-{group}", persisted)
+
+    def test_create_output_must_identify_one_matching_target(self):
+        listing = "gh pr list --repo owner/repo --limit 20"
+        create = "gh pr create --repo owner/repo --title created"
+        readback = "gh pr view 19 --repo owner/repo --json state"
+        cases = (
+            "created without a URL",
+            "https://github.com/other/repo/pull/19",
+            (
+                "https://github.com/owner/repo/pull/19\n"
+                "https://github.com/owner/repo/pull/20"
+            ),
+        )
+        for index, output in enumerate(cases):
+            with self.subTest(output=output):
+                state_dir = str(Path(self.state_dir) / f"create-ambiguous-{index}")
+                ledger.run_hook(
+                    hook_payload("PostToolUse", listing, {"exit_code": 0}),
+                    agent="codex",
+                    mode="enforce",
+                    explicit_state_dir=state_dir,
+                )
+                self.assertIsNone(
+                    ledger.run_hook(
+                        hook_payload(
+                            "PreToolUse", create, tool_use_id=f"create-{index}"
+                        ),
+                        agent="codex",
+                        mode="enforce",
+                        explicit_state_dir=state_dir,
+                    )
+                )
+                ledger.run_hook(
+                    hook_payload(
+                        "PostToolUse",
+                        create,
+                        {"exit_code": 0, "output": output},
+                        tool_use_id=f"create-{index}",
+                    ),
+                    agent="codex",
+                    mode="enforce",
+                    explicit_state_dir=state_dir,
+                )
+                ledger.run_hook(
+                    hook_payload("PostToolUse", listing, {"exit_code": 0}),
+                    agent="codex",
+                    mode="enforce",
+                    explicit_state_dir=state_dir,
+                )
+                ledger.run_hook(
+                    hook_payload("PostToolUse", readback, {"exit_code": 0}),
+                    agent="codex",
+                    mode="enforce",
+                    explicit_state_dir=state_dir,
+                )
+                denied = ledger.run_hook(
+                    hook_payload("PreToolUse", create),
+                    agent="codex",
+                    mode="enforce",
+                    explicit_state_dir=state_dir,
+                )
+                self.assertEqual(
+                    denied["hookSpecificOutput"]["permissionDecision"], "deny"
+                )
+                stop = ledger.run_hook(
+                    hook_payload("Stop"),
+                    agent="codex",
+                    mode="audit",
+                    explicit_state_dir=state_dir,
+                )
+                self.assertIn("systemMessage", stop)
+
+                connection = ledger.connect_database(state_dir)
+                try:
+                    escaped = connection.execute(
+                        """
+                        SELECT outcome FROM encounters
+                        WHERE rule_id = 'GH-WRITE-READBACK-001'
+                          AND workflow_label = 'owner/repo:pr:create'
+                        """
+                    ).fetchone()
+                    persisted = "\n".join(
+                        str(value)
+                        for row in connection.execute("SELECT * FROM encounters")
+                        for value in row
+                    )
+                finally:
+                    connection.close()
+                self.assertIsNotNone(escaped)
+                self.assertEqual(escaped["outcome"], "escaped")
+                self.assertNotIn(output, persisted)
+
+    def test_create_result_without_its_pre_mapping_cannot_consume_an_attempt(self):
+        listing = "gh pr list --repo owner/repo --limit 20"
+        create = "gh pr create --repo owner/repo --title created"
+        ledger.run_hook(
+            hook_payload("PostToolUse", listing, {"exit_code": 0}),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        ledger.run_hook(
+            hook_payload("PreToolUse", create, tool_use_id="mapped-create"),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        ledger.run_hook(
+            hook_payload(
+                "PostToolUse",
+                create,
+                {
+                    "exit_code": 0,
+                    "output": "https://github.com/owner/repo/pull/20",
+                },
+                tool_use_id="unmapped-create",
+            ),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+
+        ledger.run_hook(
+            hook_payload(
+                "PostToolUse",
+                create,
+                {
+                    "exit_code": 0,
+                    "output": "https://github.com/owner/repo/pull/19",
+                },
+                tool_use_id="mapped-create",
+            ),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        ledger.run_hook(
+            hook_payload(
+                "PostToolUse",
+                create,
+                {
+                    "exit_code": 0,
+                    "output": "https://github.com/owner/repo/pull/19",
+                },
+                tool_use_id="mapped-create",
+            ),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+
+        connection = self.connection()
+        try:
+            pending = {
+                row["workflow_label"]: row["pending_count"]
+                for row in connection.execute(
+                    "SELECT * FROM hook_activity WHERE pending_write = 1"
+                )
+            }
+        finally:
+            connection.close()
+        self.assertEqual(
+            pending,
+            {
+                "owner/repo:pr:create": 1,
+                "owner/repo#19": 0,
+            },
+        )
+
+    def test_unmapped_failed_create_cannot_be_consumed_by_another_attempt(self):
+        listing = "gh issue list --repo owner/repo --limit 20"
+        create = "gh issue create --repo owner/repo --title created"
+        ledger.run_hook(
+            hook_payload("PostToolUse", listing, {"exit_code": 0}),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        ledger.run_hook(
+            hook_payload("PreToolUse", create, tool_use_id="mapped-issue-create"),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        ledger.run_hook(
+            hook_payload(
+                "PostToolUseFailure", create, tool_use_id="unmapped-issue-create"
+            ),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        ledger.run_hook(
+            hook_payload(
+                "PostToolUse",
+                create,
+                {
+                    "exit_code": 0,
+                    "output": "https://github.com/owner/repo/issues/31",
+                },
+                tool_use_id="mapped-issue-create",
+            ),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+
+        connection = self.connection()
+        try:
+            pending = {
+                row["workflow_label"]: row["pending_count"]
+                for row in connection.execute(
+                    "SELECT * FROM hook_activity WHERE pending_write = 1"
+                )
+            }
+        finally:
+            connection.close()
+        self.assertEqual(
+            pending,
+            {
+                "owner/repo:issue:create": 1,
+                "owner/repo#31": 0,
+            },
+        )
+
+    def test_multiple_creates_in_one_tool_result_stay_generic(self):
+        listing = "gh pr list --repo owner/repo --limit 20"
+        create = "gh pr create --repo owner/repo --title one"
+        compound = f"{create}; gh pr create --repo owner/repo --title two"
+        ledger.run_hook(
+            hook_payload("PostToolUse", listing, {"exit_code": 0}),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        ledger.run_hook(
+            hook_payload("PreToolUse", compound, tool_use_id="compound-create"),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        ledger.run_hook(
+            hook_payload(
+                "PostToolUse",
+                compound,
+                {
+                    "exit_code": 0,
+                    "output": "https://github.com/owner/repo/pull/19",
+                },
+                tool_use_id="compound-create",
+            ),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+
+        connection = self.connection()
+        try:
+            pending = connection.execute(
+                """
+                SELECT workflow_label, pending_count FROM hook_activity
+                WHERE pending_write = 1
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+        self.assertEqual(
+            [(row["workflow_label"], row["pending_count"]) for row in pending],
+            [("owner/repo:pr:create", 2)],
+        )
+
+    def test_overlapping_creates_keep_each_unresolved_obligation(self):
+        listing = "gh pr list --repo owner/repo --limit 20"
+        create = "gh pr create --repo owner/repo --title created"
+        readback = "gh pr view 19 --repo owner/repo --json state"
+        ledger.run_hook(
+            hook_payload("PostToolUse", listing, {"exit_code": 0}),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        first_pre = ledger.run_hook(
+            hook_payload("PreToolUse", create, tool_use_id="create-a"),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        second_pre = ledger.run_hook(
+            hook_payload("PreToolUse", create, tool_use_id="create-b"),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        self.assertIsNone(first_pre)
+        self.assertIn("systemMessage", second_pre)
+
+        ledger.run_hook(
+            hook_payload(
+                "PostToolUse",
+                create,
+                {"exit_code": 0, "output": "created without a URL"},
+                tool_use_id="create-b",
+            ),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        ledger.run_hook(
+            hook_payload(
+                "PostToolUse",
+                create,
+                {
+                    "exit_code": 0,
+                    "output": "https://github.com/owner/repo/pull/19",
+                },
+                tool_use_id="create-a",
+            ),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+
+        connection = self.connection()
+        try:
+            pending = {
+                row["workflow_label"]: (row["pending_write"], row["pending_count"])
+                for row in connection.execute(
+                    "SELECT * FROM hook_activity WHERE pending_write = 1"
+                )
+            }
+        finally:
+            connection.close()
+        self.assertEqual(
+            pending,
+            {
+                "owner/repo:pr:create": (1, 1),
+                "owner/repo#19": (1, 0),
+            },
+        )
+
+        ledger.run_hook(
+            hook_payload("PostToolUse", readback, {"exit_code": 0}),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        stop = ledger.run_hook(
+            hook_payload("Stop"),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        self.assertIn("owner/repo:pr:create", stop["systemMessage"])
+
+    def test_existing_ledger_adds_create_attempt_count_column(self):
+        state_dir = Path(self.state_dir) / "old-schema"
+        state_dir.mkdir()
+        connection = sqlite3.connect(state_dir / "encounters.sqlite3")
+        try:
+            connection.execute(
+                """
+                CREATE TABLE hook_activity (
+                    session_id TEXT NOT NULL,
+                    turn_id TEXT NOT NULL,
+                    workflow_key TEXT NOT NULL,
+                    workflow_label TEXT NOT NULL,
+                    repo_key TEXT NOT NULL,
+                    preflight_seen INTEGER NOT NULL DEFAULT 0,
+                    pending_write INTEGER NOT NULL DEFAULT 0,
+                    pending_summary TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (session_id, turn_id, workflow_key)
+                )
+                """
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        upgraded = ledger.connect_database(str(state_dir))
+        try:
+            columns = {
+                row["name"]
+                for row in upgraded.execute("PRAGMA table_info(hook_activity)")
+            }
+        finally:
+            upgraded.close()
+        self.assertIn("pending_count", columns)
+
     def test_readback_must_match_the_exact_written_target(self):
         read_11 = "gh pr view 11 --repo owner/repo --json state"
         write_11 = "gh pr comment 11 --repo owner/repo --body done"
@@ -2190,6 +2692,69 @@ class ClaudeHookTests(unittest.TestCase):
             claude_payload("Stop", session_id=session_id, stop_hook_active=False)
         )
         self.assertEqual(stop, {})
+
+    def test_claude_issue_create_rekeys_from_stdout(self):
+        session_id = "claude-create-issue"
+        listing = "gh issue list --repo owner/repo --limit 20"
+        create = "gh issue create --repo owner/repo --title created"
+        readback = "gh issue view 31 --repo owner/repo --json state"
+        self.run_successful_command(
+            listing,
+            session_id=session_id,
+            tool_use_id="toolu_create_issue_list",
+        )
+        self.assertIsNone(
+            self.run_hook(
+                claude_payload(
+                    "PreToolUse",
+                    create,
+                    session_id=session_id,
+                    tool_use_id="toolu_create_issue",
+                ),
+                mode="enforce",
+            )
+        )
+        self.run_hook(
+            claude_payload(
+                "PostToolUse",
+                create,
+                dict(
+                    CLAUDE_BASH_OK,
+                    stdout="https://github.com/owner/repo/issues/31\n",
+                ),
+                session_id=session_id,
+                tool_use_id="toolu_create_issue",
+            ),
+            mode="enforce",
+        )
+        self.run_successful_command(
+            readback,
+            session_id=session_id,
+            tool_use_id="toolu_create_issue_readback",
+        )
+        self.assertEqual(
+            self.run_hook(
+                claude_payload("Stop", session_id=session_id), mode="enforce"
+            ),
+            {},
+        )
+
+        connection = ledger.connect_database(self.state_dir)
+        try:
+            outcomes = {
+                (row["rule_id"], row["workflow_label"]): row["outcome"]
+                for row in connection.execute("SELECT * FROM encounters")
+            }
+        finally:
+            connection.close()
+        self.assertEqual(
+            outcomes[("GH-LIVE-STATE-001", "owner/repo:issue:create")],
+            "passed",
+        )
+        self.assertEqual(
+            outcomes[("GH-WRITE-READBACK-001", "owner/repo#31")],
+            "passed",
+        )
 
     def test_claude_interrupted_write_is_pending_but_not_counted_as_success(self):
         session_id = "claude-interrupted-write"
