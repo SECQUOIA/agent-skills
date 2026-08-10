@@ -66,13 +66,15 @@ python ~/.codex/skills/apply-conversation-lessons/scripts/encounter_ledger.py re
 
 The runner is agent-neutral: both installers point their handlers at the same installed script (`hook --agent codex|claude --mode audit`) and both agents write to the same local ledger, so retries and agent switches on one task dedupe into a single episode.
 
+Hooks are a per-machine opt-in. Pulling merged skills (`git pull` or `sync-secquoia-skills`) never installs, changes, or removes hooks; each user decides separately whether to run the hook installers on their machine. The merged handler configuration, its timestamped backups, and the encounter ledger live outside this repository and are never committed or included in a learnings PR — only the runner script, installers, and tests are shared.
+
 ## Update
 
 ```bash
 cd ~/secquoia-agent-skills && git pull
 ```
 
-Because `install.sh` symlinks, a `git pull` updates both tools at once (no reinstall needed unless you used `--copy`).
+Because `install.sh` symlinks, a `git pull` updates both tools at once (no reinstall needed unless you used `--copy`). This includes installed hook behavior: the handlers execute the shared runner fresh on every event through the same path, so a pull changes what already-installed hooks do without touching `~/.codex/hooks.json` or `~/.claude/settings.json` — no reinstall, session restart, or Codex re-trust required. With `--copy`, re-run `./install.sh` (plus your hook flag) after each pull to refresh the copied runner.
 
 ## Uninstall
 
