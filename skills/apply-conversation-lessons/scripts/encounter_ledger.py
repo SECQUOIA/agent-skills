@@ -796,9 +796,30 @@ class _ExecutionContext:
     working_directory: str | None = None
 
 
+# Sentinels injected into the normalized token stream when a wrapper leaves
+# repository scope, hostname, or working directory unknowable. The leading "$"
+# routes them through _dynamic_shell_value, so an operation carrying one can
+# never be read-eligible or serve as exact-scope evidence. The sentinel is
+# stable text on purpose: identically wrapped retries normalize to the same
+# workflow key and dedupe into one episode. Verification stays fail-closed —
+# no eligible read can ever share a sentinel key, so a host- or scope-scrubbed
+# write keeps its readback obligation until the turn escapes; rerun the write
+# without the scrubbing wrapper (or with sudo -E) to make it verifiable. The
+# working-directory sentinel is a path that cannot exist, so relative @file
+# reads under an unknown cwd fail closed to "unknown".
+WRAPPER_UNKNOWN_HOST_SENTINEL = "$SECQUOIA_WRAPPER_UNKNOWN_HOST"
+WRAPPER_CWD_SENTINEL = "$SECQUOIA_WRAPPER_CWD"
+UNKNOWN_WORKING_DIRECTORY = "/__secquoia_unknown_working_directory__"
+
 # These wrappers execute a following command, but only when their option grammar
 # is known. Unknown options fail closed: guessing whether they consume a value
 # can otherwise hide the real command or expose inert argument text as `gh`.
+# Launchers outside these tables (for example `find -exec`, `parallel`,
+# `script -c`, `ssh`, or `su -c`) are deliberately out of scope: their
+# prefixes never parse as executable, so nothing behind them can authorize a
+# write, and gh writes behind them stay untracked — the README's "workflow
+# guard, not a security sandbox" boundary. Extend a grammar rather than
+# loosening the parser when a new wrapper matters.
 EXEC_THROUGH_WRAPPERS = {
     "ionice": _ExecWrapperGrammar(
         value_options=frozenset({"-c", "-n", "--class", "--classdata"}),
@@ -1889,7 +1910,7 @@ def _segments_containing_gh(
                     context.host_environment_uncertain
                     and _flag_value(normalized, "--hostname") is None
                 ):
-                    normalized.extend(["--hostname", "$SECQUOIA_WRAPPER_UNKNOWN_HOST"])
+                    normalized.extend(["--hostname", WRAPPER_UNKNOWN_HOST_SENTINEL])
                 elif (
                     context.host_environment_reset
                     and _flag_value(normalized, "--hostname") is None
@@ -2444,14 +2465,14 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
         operation_cwd = (
             context.working_directory
             if context.working_directory is not None
-            else "/__secquoia_unknown_working_directory__"
+            else UNKNOWN_WORKING_DIRECTORY
         )
         if (
             context.repository_scope_changed
             and "GH_REPO" not in context.environment
             and not _has_explicit_repository_scope(tokens, operation_cwd)
         ):
-            tokens = [*tokens, "--repo", "$SECQUOIA_WRAPPER_CWD"]
+            tokens = [*tokens, "--repo", WRAPPER_CWD_SENTINEL]
         group = tokens[1]
         action = tokens[2] if len(tokens) > 2 else ""
         if group in IGNORED_GROUPS:

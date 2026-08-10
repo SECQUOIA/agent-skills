@@ -589,6 +589,43 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertEqual(cleared_host.repo_key, "github:github.com:owner/repo")
         self.assertEqual(nested_repo.workflow_label, "owner/repo#11")
 
+    def test_wrapper_sentinels_stay_dynamic_and_key_consistently(self):
+        self.assertTrue(
+            ledger._dynamic_shell_value(ledger.WRAPPER_UNKNOWN_HOST_SENTINEL)
+        )
+        self.assertTrue(ledger._dynamic_shell_value(ledger.WRAPPER_CWD_SENTINEL))
+        self.assertFalse(Path(ledger.UNKNOWN_WORKING_DIRECTORY).exists())
+
+        write = ledger.classify_gh_operations(
+            "GH_HOST=ghe.example.com sudo "
+            "gh pr comment 11 --repo owner/repo --body done",
+            "/tmp",
+        )[0]
+        readback = ledger.classify_gh_operations(
+            "GH_HOST=ghe.example.com sudo gh pr view 11 --repo owner/repo --json state",
+            "/tmp",
+        )[0]
+        sentinel = ledger.WRAPPER_UNKNOWN_HOST_SENTINEL.lower()
+        self.assertIn(sentinel, write.workflow_key)
+        self.assertNotIn("ghe.example.com", write.workflow_key)
+        # Identically wrapped retries dedupe onto one key, but no read carrying
+        # a sentinel is ever eligible: a host-scrubbed write stays unverifiable
+        # by design and escapes at the turn boundary.
+        self.assertEqual(write.workflow_key, readback.workflow_key)
+        self.assertEqual(readback.kind, "read")
+        self.assertFalse(readback.read_eligible)
+
+    def test_unrecognized_launchers_stay_out_of_scope(self):
+        write = "gh pr comment 11 --repo owner/repo --body done"
+        for launcher in (
+            f"find . -name x -exec bash -c '{write}' \\;",
+            f"parallel bash -c '{write}'",
+            f"script -qec 'bash -c \"{write}\"' /dev/null",
+            f"su -c '{write}' deploy",
+        ):
+            with self.subTest(launcher=launcher):
+                self.assertEqual(ledger.classify_gh_operations(launcher, "/tmp"), [])
+
     def test_exec_wrapper_changed_cwd_resolves_relative_graphql_files(self):
         source = Path(self.temporary.name) / "source"
         target = Path(self.temporary.name) / "target"
