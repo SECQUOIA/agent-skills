@@ -8,6 +8,12 @@ SRC="$REPO_DIR/skills"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 TARGETS=("$CODEX_HOME/skills" "$HOME/.claude/skills")
 
+ENCOUNTER_SCRIPT="$SRC/apply-conversation-lessons/scripts/encounter_ledger.py"
+if [ -f "$ENCOUNTER_SCRIPT" ]; then
+  python3 "$ENCOUNTER_SCRIPT" uninstall-codex-hooks --codex-home "$CODEX_HOME"
+  python3 "$ENCOUNTER_SCRIPT" uninstall-claude-hooks --settings-path "$HOME/.claude/settings.json"
+fi
+
 for T in "${TARGETS[@]}"; do
   [ -d "$T" ] || continue
   echo "Removing from $T:"
