@@ -455,6 +455,206 @@ class EncounterLedgerTests(unittest.TestCase):
             [],
         )
 
+    def test_exec_wrapper_reads_must_be_success_coupled(self):
+        detached_read = "setsid -f gh pr view 11 --repo owner/repo --json state"
+        waited_read = "setsid -f -w gh pr view 11 --repo owner/repo --json state"
+        clustered_waited_read = (
+            "setsid -fw gh pr view 11 --repo owner/repo --json state"
+        )
+        background_read = (
+            "sudo --background gh pr view 11 --repo owner/repo --json state"
+        )
+        split_read = "env -S 'gh pr view 11 --repo owner/repo --json state'"
+        background_split_read = f"{split_read} &"
+        write = "gh pr comment 11 --repo owner/repo --body done"
+
+        detached = ledger.classify_gh_operations(detached_read, "/tmp")[0]
+        waited = ledger.classify_gh_operations(waited_read, "/tmp")[0]
+        clustered_waited = ledger.classify_gh_operations(clustered_waited_read, "/tmp")[
+            0
+        ]
+        background = ledger.classify_gh_operations(background_read, "/tmp")[0]
+        split = ledger.classify_gh_operations(split_read, "/tmp")[0]
+        background_split = ledger.classify_gh_operations(background_split_read, "/tmp")[
+            0
+        ]
+        self.assertEqual(detached.kind, "read")
+        self.assertFalse(detached.read_eligible)
+        self.assertTrue(waited.read_eligible)
+        self.assertTrue(clustered_waited.read_eligible)
+        self.assertFalse(background.read_eligible)
+        self.assertTrue(split.read_eligible)
+        self.assertFalse(background_split.read_eligible)
+
+        ledger.run_hook(
+            hook_payload("PostToolUse", detached_read, {"exit_code": 0}),
+            agent="codex",
+            mode="enforce",
+            explicit_state_dir=self.state_dir,
+        )
+        denied = ledger.run_hook(
+            hook_payload("PreToolUse", write),
+            agent="codex",
+            mode="enforce",
+            explicit_state_dir=self.state_dir,
+        )
+        self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_exec_wrapper_grammar_recognizes_valid_chains(self):
+        write = "gh pr comment 11 --repo owner/repo --body done"
+        for command in (
+            "sudo --user deploy gh pr merge 11 --repo owner/repo",
+            "sudo -nu deploy gh pr merge 11 --repo owner/repo",
+            "sudo --user gh gh pr comment 11 --repo owner/repo --body done",
+            "sudo GH_REPO=owner/repo gh pr comment 11 --body done",
+            "sudo --group staff gh pr merge 11 --repo owner/repo",
+            "sudo --chdir /tmp gh pr merge 11 --repo owner/repo",
+            "timeout 5 env gh pr comment 11 --repo owner/repo --body done",
+            "env --unset gh gh pr comment 11 --repo owner/repo --body done",
+            "env --list-signal-handling gh pr comment 11 --repo owner/repo --body done",
+            "env -S 'gh pr comment 11 --repo owner/repo --body done'",
+            "env -S '-i GH_REPO=owner/repo gh pr comment 11 --body done'",
+            "env -iS 'GH_REPO=owner/repo gh pr comment 11 --body done'",
+            "env -S '' gh pr comment 11 --repo owner/repo --body done",
+            f"xargs -0r bash -c '{write}'",
+            f"xargs -0I{{}} bash -c '{write}'",
+            f"xargs --max-lines bash -c '{write}'",
+            "timeout 1e-3 gh pr comment 11 --repo owner/repo --body done",
+            "timeout infinity gh pr comment 11 --repo owner/repo --body done",
+            "stdbuf -o1k gh pr comment 11 --repo owner/repo --body done",
+            f"timeout 5 env A=B bash -c '{write}'",
+        ):
+            with self.subTest(command=command):
+                operations = ledger.classify_gh_operations(command, "/tmp")
+                self.assertEqual(
+                    [operation.kind for operation in operations], ["write"]
+                )
+                self.assertEqual(operations[0].workflow_label, "owner/repo#11")
+
+    def test_exec_wrapper_environment_effects_do_not_reuse_stale_scope(self):
+        with mock.patch.object(ledger, "_repo_from_cwd", return_value="source/repo"):
+            unset_repo = ledger.classify_gh_operations(
+                "GH_REPO=wrong/repo env -u GH_REPO gh pr view 11 --json state",
+                "/source",
+            )[0]
+            changed_cwd = ledger.classify_gh_operations(
+                "env --chdir /other gh pr comment 11 --body done", "/source"
+            )[0]
+            sudo_changed_cwd = ledger.classify_gh_operations(
+                "sudo --chdir /other gh pr comment 11 --body done", "/source"
+            )[0]
+            sudo_login = ledger.classify_gh_operations(
+                "sudo --login gh pr comment 11 --body done", "/source"
+            )[0]
+            nested_changed_cwd = ledger.classify_gh_operations(
+                "env --chdir /other bash -c 'gh pr comment 11 --body done'",
+                "/source",
+            )[0]
+            reset_by_sudo = ledger.classify_gh_operations(
+                "GH_REPO=wrong/repo sudo gh pr view 11 --json state", "/source"
+            )[0]
+            preserved_by_sudo = ledger.classify_gh_operations(
+                "GH_REPO=owner/repo sudo -E gh pr view 11 --json state", "/source"
+            )[0]
+
+        self.assertEqual(unset_repo.workflow_label, "source/repo#11")
+        self.assertFalse(unset_repo.read_eligible)
+        for operation in (
+            changed_cwd,
+            sudo_changed_cwd,
+            sudo_login,
+            nested_changed_cwd,
+        ):
+            self.assertEqual(operation.kind, "write")
+            self.assertIn("dynamic", operation.workflow_key)
+        self.assertEqual(reset_by_sudo.kind, "read")
+        self.assertIn("dynamic", reset_by_sudo.workflow_key)
+        self.assertFalse(reset_by_sudo.read_eligible)
+        self.assertEqual(preserved_by_sudo.workflow_label, "owner/repo#11")
+        self.assertTrue(preserved_by_sudo.read_eligible)
+
+        unset_host = ledger.classify_gh_operations(
+            "GH_HOST=git.example env --unset=GH_HOST "
+            "gh pr view 11 --repo owner/repo --json state",
+            "/tmp",
+        )[0]
+        cleared_host = ledger.classify_gh_operations(
+            "GH_HOST=git.example env -i GH_REPO=owner/repo gh pr view 11 --json state",
+            "/tmp",
+        )[0]
+        nested_repo = ledger.classify_gh_operations(
+            "env GH_REPO=owner/repo bash -c 'gh pr comment 11 --body done'", "/tmp"
+        )[0]
+        self.assertEqual(unset_host.repo_key, "github:github.com:owner/repo")
+        self.assertEqual(cleared_host.repo_key, "github:github.com:owner/repo")
+        self.assertEqual(nested_repo.workflow_label, "owner/repo#11")
+
+    def test_exec_wrapper_changed_cwd_resolves_relative_graphql_files(self):
+        source = Path(self.temporary.name) / "source"
+        target = Path(self.temporary.name) / "target"
+        source.mkdir()
+        target.mkdir()
+        (source / "request.graphql").write_text(
+            "query Current { viewer { login } }", encoding="utf-8"
+        )
+        (target / "request.graphql").write_text(
+            "mutation Change { addComment(input:{}) { clientMutationId } }",
+            encoding="utf-8",
+        )
+
+        operation = ledger.classify_gh_operations(
+            f"env -C {shlex.quote(str(target))} gh api graphql "
+            "-f query=@request.graphql --repo owner/repo",
+            str(source),
+        )[0]
+        unknown_cwd = ledger.classify_gh_operations(
+            "sudo --login gh api graphql -f query=@request.graphql --repo owner/repo",
+            str(source),
+        )[0]
+        absolute_query = ledger.classify_gh_operations(
+            "sudo --login gh api graphql "
+            f"-f query=@{shlex.quote(str(source / 'request.graphql'))} "
+            "--repo owner/repo",
+            str(source),
+        )[0]
+        stdin_query = ledger.classify_gh_operations(
+            "sudo --login gh api graphql -f query=@- --repo owner/repo",
+            str(source),
+        )[0]
+
+        self.assertEqual(operation.kind, "write")
+        self.assertEqual(operation.repo_key, "github:github.com:owner/repo")
+        self.assertEqual(unknown_cwd.kind, "unknown")
+        self.assertEqual(absolute_query.kind, "read")
+        self.assertEqual(stdin_query.kind, "unknown")
+
+    def test_exec_wrapper_grammar_rejects_nonexecuting_prefixes(self):
+        write = "gh pr comment 11 --repo owner/repo --body done"
+        for command in (
+            "sudo -u gh pr comment 11 --repo owner/repo --body done",
+            f"xargs -I bash -c '{write}'",
+            f"nice -n bash -c '{write}'",
+            f"stdbuf -o bash -c '{write}'",
+            "timeout 5 NOTE=x gh pr comment 11 --repo owner/repo --body done",
+            f"timeout 5 NOTE=x bash -c '{write}'",
+            f"timeout 5 command bash -c '{write}'",
+            "ionice -p gh pr comment 11 --repo owner/repo --body done",
+            f"nice --help bash -c '{write}'",
+            "env -0 gh pr comment 11 --repo owner/repo --body done",
+            "stdbuf gh pr comment 11 --repo owner/repo --body done",
+            "nice -n nope gh pr comment 11 --repo owner/repo --body done",
+            "timeout nope gh pr comment 11 --repo owner/repo --body done",
+            "stdbuf -o1kb gh pr comment 11 --repo owner/repo --body done",
+            f"xargs --max-lines=bad bash -c '{write}'",
+            f"xargs -n0 bash -c '{write}'",
+            f"xargs -L0 bash -c '{write}'",
+            f"xargs -s0 bash -c '{write}'",
+            f"xargs -0l0 bash -c '{write}'",
+            f"xargs -0lbad bash -c '{write}'",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(ledger.classify_gh_operations(command, "/tmp"), [])
+
     def test_graphql_number_targets_do_not_bridge_to_cli_prs(self):
         bound_query = Path(self.temporary.name) / "bound-pr.graphql"
         bound_query.write_text(

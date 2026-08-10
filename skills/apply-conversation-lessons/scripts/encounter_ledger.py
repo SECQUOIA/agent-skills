@@ -741,59 +741,357 @@ def _command_substitutions(command: str) -> Iterable[str]:
         index += 1
 
 
-# Wrappers that execute their command argument unchanged. Each maps to
-# (value_options, positional_operands): options that consume the next token,
-# and how many positional operands precede the wrapped command. Unknown dash
-# options are skipped alone; a wrapper missing a required operand does not
-# parse, so its prefix stays non-executable.
+@dataclass(frozen=True)
+class _ExecWrapperGrammar:
+    value_options: frozenset[str] = frozenset()
+    boolean_options: frozenset[str] = frozenset()
+    optional_inline_value_options: frozenset[str] = frozenset()
+    terminal_options: frozenset[str] = frozenset()
+    nonexecuting_options: frozenset[str] = frozenset()
+    wait_options: frozenset[str] = frozenset()
+    detaching_options: frozenset[str] = frozenset()
+    scope_options: frozenset[str] = frozenset()
+    cwd_value_options: frozenset[str] = frozenset()
+    unknown_cwd_options: frozenset[str] = frozenset()
+    required_any_options: frozenset[str] = frozenset()
+    preserve_environment_options: frozenset[str] = frozenset()
+    positional_operands: int = 0
+    numeric_adjustment: bool = False
+    short_option_clusters: bool = False
+    command_environment: bool = False
+    scrubs_environment: bool = False
+
+
+@dataclass(frozen=True)
+class _WrapperConsumption:
+    span: int
+    read_success_coupled: bool
+    repository_scope_changed: bool = False
+    working_directory_changed: bool = False
+    working_directory: str | None = None
+    command_environment: dict[str, str] | None = None
+    scrubs_environment: bool = False
+    preserve_all_environment: bool = False
+    preserved_environment: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class _EnvConsumption:
+    span: int
+    environment: dict[str, str]
+    unset_variables: frozenset[str]
+    clear_environment: bool
+    repository_scope_changed: bool
+    working_directory: str | None
+    split_command: str | None = None
+
+
+@dataclass(frozen=True)
+class _ExecutionContext:
+    environment: dict[str, str]
+    read_success_coupled: bool = True
+    repository_scope_changed: bool = False
+    host_environment_reset: bool = False
+    host_environment_uncertain: bool = False
+    working_directory: str | None = None
+
+
+# These wrappers execute a following command, but only when their option grammar
+# is known. Unknown options fail closed: guessing whether they consume a value
+# can otherwise hide the real command or expose inert argument text as `gh`.
 EXEC_THROUGH_WRAPPERS = {
-    "ionice": ({"-c", "-n", "--class", "--classdata"}, 0),
-    "nice": ({"-n", "--adjustment"}, 0),
-    "nohup": (set(), 0),
-    "setsid": (set(), 0),
-    "stdbuf": ({"-e", "-i", "-o", "--error", "--input", "--output"}, 0),
-    "sudo": ({"-C", "-D", "-T", "-U", "-g", "-h", "-p", "-r", "-t", "-u"}, 0),
-    "timeout": ({"-k", "-s", "--kill-after", "--signal"}, 1),
+    "ionice": _ExecWrapperGrammar(
+        value_options=frozenset({"-c", "-n", "--class", "--classdata"}),
+        boolean_options=frozenset({"-t", "--ignore"}),
+        terminal_options=frozenset({"-h", "-V", "--help", "--version"}),
+        nonexecuting_options=frozenset({"-p", "-P", "-u", "--pid", "--pgid", "--uid"}),
+    ),
+    "nice": _ExecWrapperGrammar(
+        value_options=frozenset({"-n", "--adjustment"}),
+        terminal_options=frozenset({"--help", "--version"}),
+        numeric_adjustment=True,
+    ),
+    "nohup": _ExecWrapperGrammar(terminal_options=frozenset({"--help", "--version"})),
+    "setsid": _ExecWrapperGrammar(
+        boolean_options=frozenset({"-c", "-f", "-w", "--ctty", "--fork", "--wait"}),
+        terminal_options=frozenset({"-h", "-V", "--help", "--version"}),
+        wait_options=frozenset({"-w", "--wait"}),
+        short_option_clusters=True,
+    ),
+    "stdbuf": _ExecWrapperGrammar(
+        value_options=frozenset({"-e", "-i", "-o", "--error", "--input", "--output"}),
+        terminal_options=frozenset({"--help", "--version"}),
+        required_any_options=frozenset(
+            {"-e", "-i", "-o", "--error", "--input", "--output"}
+        ),
+    ),
+    "sudo": _ExecWrapperGrammar(
+        value_options=frozenset(
+            {
+                "-C",
+                "-D",
+                "-R",
+                "-T",
+                "-U",
+                "-a",
+                "-c",
+                "-g",
+                "-h",
+                "-p",
+                "-r",
+                "-t",
+                "-u",
+                "--auth-type",
+                "--chdir",
+                "--chroot",
+                "--close-from",
+                "--command-timeout",
+                "--group",
+                "--host",
+                "--login-class",
+                "--other-user",
+                "--prompt",
+                "--role",
+                "--type",
+                "--user",
+            }
+        ),
+        boolean_options=frozenset(
+            {
+                "-A",
+                "-B",
+                "-E",
+                "-H",
+                "-P",
+                "-S",
+                "-b",
+                "-i",
+                "-k",
+                "-n",
+                "-s",
+                "--askpass",
+                "--background",
+                "--bell",
+                "--login",
+                "--non-interactive",
+                "--preserve-groups",
+                "--reset-timestamp",
+                "--set-home",
+                "--shell",
+                "--stdin",
+            }
+        ),
+        detaching_options=frozenset({"-b", "--background"}),
+        scope_options=frozenset({"-D", "-R", "-i", "--chdir", "--chroot", "--login"}),
+        cwd_value_options=frozenset({"-D", "--chdir"}),
+        unknown_cwd_options=frozenset({"-R", "-i", "--chroot", "--login"}),
+        optional_inline_value_options=frozenset({"--preserve-env"}),
+        preserve_environment_options=frozenset({"-E", "--preserve-env"}),
+        short_option_clusters=True,
+        command_environment=True,
+        scrubs_environment=True,
+        terminal_options=frozenset(
+            {
+                "-K",
+                "-V",
+                "-e",
+                "-l",
+                "-v",
+                "--edit",
+                "--help",
+                "--list",
+                "--remove-timestamp",
+                "--validate",
+                "--version",
+            }
+        ),
+    ),
+    "timeout": _ExecWrapperGrammar(
+        value_options=frozenset({"-k", "-s", "--kill-after", "--signal"}),
+        boolean_options=frozenset(
+            {"-v", "--foreground", "--preserve-status", "--verbose"}
+        ),
+        terminal_options=frozenset({"--help", "--version"}),
+        positional_operands=1,
+    ),
 }
 
 # xargs appends stdin-derived arguments, so a direct `xargs gh ...` command is
 # incomplete and stays untracked; a shell-wrapped `xargs bash -c 'gh ...'`
 # carries its full gh command inline and is scanned.
 SHELL_ONLY_EXEC_WRAPPERS = {
-    "xargs": (
-        {
-            "-E",
-            "-I",
-            "-L",
-            "-P",
-            "-a",
-            "-d",
-            "-i",
-            "-l",
-            "-n",
-            "-s",
-            "--arg-file",
-            "--delimiter",
-            "--eof",
-            "--max-args",
-            "--max-chars",
-            "--max-lines",
-            "--max-procs",
-            "--replace",
-        },
-        0,
+    "xargs": _ExecWrapperGrammar(
+        value_options=frozenset(
+            {
+                "-E",
+                "-I",
+                "-L",
+                "-P",
+                "-a",
+                "-d",
+                "-n",
+                "-s",
+                "--arg-file",
+                "--delimiter",
+                "--max-args",
+                "--max-chars",
+                "--max-procs",
+                "--process-slot-var",
+            }
+        ),
+        boolean_options=frozenset(
+            {
+                "-0",
+                "-o",
+                "-p",
+                "-r",
+                "-t",
+                "-x",
+                "--exit",
+                "--interactive",
+                "--no-run-if-empty",
+                "--null",
+                "--open-tty",
+                "--show-limits",
+                "--verbose",
+            }
+        ),
+        optional_inline_value_options=frozenset(
+            {"-e", "-i", "-l", "--eof", "--max-lines", "--replace"}
+        ),
+        terminal_options=frozenset({"--help", "--version"}),
+        short_option_clusters=True,
     ),
 }
 
 
+def _attached_option(token: str, options: frozenset[str]) -> str | None:
+    for option in options:
+        if option.startswith("--") and token.startswith(f"{option}="):
+            return option
+        if len(option) == 2 and token.startswith(option) and token != option:
+            return option
+    return None
+
+
+def _attached_option_argument(token: str, option: str) -> str:
+    if option.startswith("--"):
+        return token.split("=", 1)[1]
+    return token[len(option) :].removeprefix("=")
+
+
+def _wrapper_value_is_valid(wrapper: str, option: str, value: str) -> bool:
+    if not value:
+        return False
+    if wrapper == "nice" and option in {"-n", "--adjustment"}:
+        return re.fullmatch(r"[+-]?\d+", value) is not None
+    if wrapper == "timeout" and option in {
+        "duration",
+        "-k",
+        "--kill-after",
+    }:
+        return (
+            re.fullmatch(
+                r"[+]?(?:(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?|inf(?:inity)?)"
+                r"(?:[smhd])?",
+                value,
+                re.I,
+            )
+            is not None
+        )
+    if wrapper == "stdbuf" and option in {
+        "-e",
+        "-i",
+        "-o",
+        "--error",
+        "--input",
+        "--output",
+    }:
+        if value == "L":
+            return option not in {"-i", "--input"}
+        return (
+            re.fullmatch(r"\d+(?:[kKmMgGtTpPeEzZyYrRqQ](?:i?B)?)?", value) is not None
+        )
+    if wrapper == "xargs" and option in {
+        "-L",
+        "-P",
+        "-l",
+        "-n",
+        "-s",
+        "--max-args",
+        "--max-chars",
+        "--max-lines",
+        "--max-procs",
+    }:
+        if re.fullmatch(r"\d+", value) is None:
+            return False
+        if option in {"-P", "--max-procs"}:
+            return True
+        return int(value) > 0
+    return True
+
+
+def _consume_short_option_cluster(
+    token: str,
+    tokens: list[str],
+    index: int,
+    wrapper: str,
+    grammar: _ExecWrapperGrammar,
+) -> tuple[int, set[str], dict[str, str]] | None:
+    if (
+        not grammar.short_option_clusters
+        or not token.startswith("-")
+        or token.startswith("--")
+        or len(token) < 3
+    ):
+        return None
+    seen: set[str] = set()
+    values: dict[str, str] = {}
+    offset = 1
+    while offset < len(token):
+        option = f"-{token[offset]}"
+        if option in grammar.boolean_options:
+            seen.add(option)
+            offset += 1
+            continue
+        if option in grammar.value_options:
+            value = token[offset + 1 :]
+            next_index = index + 1
+            if not value:
+                if next_index >= len(tokens):
+                    return None
+                value = tokens[next_index]
+                next_index += 1
+            if not _wrapper_value_is_valid(wrapper, option, value):
+                return None
+            seen.add(option)
+            values[option] = value
+            return next_index, seen, values
+        if option in grammar.optional_inline_value_options:
+            seen.add(option)
+            value = token[offset + 1 :]
+            if value:
+                if not _wrapper_value_is_valid(wrapper, option, value):
+                    return None
+                values[option] = value
+            return index + 1, seen, values
+        return None
+    return index + 1, seen, values
+
+
 def _consume_exec_wrapper(
-    tokens: list[str], grammars: dict[str, tuple[set[str], int]]
-) -> int | None:
-    """Return how many tokens the wrapper at tokens[0] spans, or None."""
-    grammar = grammars.get(Path(tokens[0]).name)
+    tokens: list[str], grammars: dict[str, _ExecWrapperGrammar]
+) -> _WrapperConsumption | None:
+    """Parse one wrapper prefix without borrowing the following command token."""
+    wrapper = Path(tokens[0]).name
+    grammar = grammars.get(wrapper)
     if grammar is None:
         return None
-    value_options, pending_operands = grammar
+    pending_operands = grammar.positional_operands
+    seen_options: set[str] = set()
+    option_values: dict[str, str] = {}
+    command_environment: dict[str, str] = {}
+    positional_index = 0
     index = 1
     options_done = False
     while index < len(tokens):
@@ -803,49 +1101,384 @@ def _consume_exec_wrapper(
             index += 1
             continue
         if not options_done and token.startswith("-") and token != "-":
-            if token in value_options:
+            if token in grammar.terminal_options:
+                return None
+            if token in grammar.nonexecuting_options or _attached_option(
+                token, grammar.nonexecuting_options
+            ):
+                return None
+            if token in grammar.value_options:
+                if index + 1 >= len(tokens):
+                    return None
+                value = tokens[index + 1]
+                if not _wrapper_value_is_valid(wrapper, token, value):
+                    return None
+                seen_options.add(token)
+                option_values[token] = value
                 index += 2
                 continue
-            if any(
-                option.startswith("--") and token.startswith(f"{option}=")
-                for option in value_options
-            ):
+            attached_value = _attached_option(token, grammar.value_options)
+            if attached_value:
+                value = _attached_option_argument(token, attached_value)
+                if not _wrapper_value_is_valid(wrapper, attached_value, value):
+                    return None
+                seen_options.add(attached_value)
+                option_values[attached_value] = value
                 index += 1
                 continue
-            if any(
-                len(option) == 2 and token.startswith(option) and token != option
-                for option in value_options
-            ):
+            if token in grammar.optional_inline_value_options:
+                seen_options.add(token)
                 index += 1
                 continue
-            index += 1
-            continue
+            attached_optional = _attached_option(
+                token, grammar.optional_inline_value_options
+            )
+            if attached_optional:
+                value = _attached_option_argument(token, attached_optional)
+                if not _wrapper_value_is_valid(wrapper, attached_optional, value):
+                    return None
+                seen_options.add(attached_optional)
+                option_values[attached_optional] = value
+                index += 1
+                continue
+            if token in grammar.boolean_options:
+                seen_options.add(token)
+                index += 1
+                continue
+            cluster = _consume_short_option_cluster(
+                token, tokens, index, wrapper, grammar
+            )
+            if cluster is not None:
+                index, cluster_seen, cluster_values = cluster
+                seen_options.update(cluster_seen)
+                option_values.update(cluster_values)
+                continue
+            if grammar.numeric_adjustment and re.fullmatch(r"-\d+", token):
+                index += 1
+                continue
+            return None
+        if not options_done and grammar.command_environment:
+            match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", token, re.S)
+            if match:
+                command_environment[match.group(1)] = match.group(2)
+                index += 1
+                continue
         if pending_operands:
+            option = (
+                "duration" if wrapper == "timeout" and positional_index == 0 else ""
+            )
+            if option and not _wrapper_value_is_valid(wrapper, option, token):
+                return None
             pending_operands -= 1
+            positional_index += 1
             index += 1
             continue
         break
-    return None if pending_operands else index
+    if pending_operands or (
+        grammar.required_any_options
+        and not grammar.required_any_options.intersection(seen_options)
+    ):
+        return None
+    working_directory_changed = bool(grammar.scope_options.intersection(seen_options))
+    working_directory = None
+    if not grammar.unknown_cwd_options.intersection(seen_options):
+        for option in grammar.cwd_value_options:
+            if option in option_values:
+                working_directory = option_values[option]
+                break
+    preserve_all_environment = bool(
+        "-E" in seen_options
+        or ("--preserve-env" in seen_options and "--preserve-env" not in option_values)
+    )
+    preserved_environment: set[str] = set()
+    preserve_value = option_values.get("--preserve-env")
+    if preserve_value:
+        preserved_environment.update(
+            name.strip() for name in preserve_value.split(",") if name.strip()
+        )
+    if {"-i", "--login"}.intersection(seen_options):
+        preserve_all_environment = False
+        preserved_environment.clear()
+    return _WrapperConsumption(
+        span=index,
+        read_success_coupled=(
+            (
+                not grammar.wait_options
+                or bool(grammar.wait_options.intersection(seen_options))
+            )
+            and not grammar.detaching_options.intersection(seen_options)
+        ),
+        repository_scope_changed=working_directory_changed,
+        working_directory_changed=working_directory_changed,
+        working_directory=working_directory,
+        command_environment=command_environment,
+        scrubs_environment=grammar.scrubs_environment,
+        preserve_all_environment=preserve_all_environment,
+        preserved_environment=frozenset(preserved_environment),
+    )
 
 
-def _inline_environment(prefix: list[str]) -> tuple[dict[str, str], bool]:
-    remaining = list(prefix)
-    if remaining and remaining[0] in {"command", "env", "exec"}:
-        remaining.pop(0)
+ENV_VALUE_OPTIONS = frozenset({"-C", "-u", "--chdir", "--unset"})
+ENV_OPTIONAL_INLINE_VALUE_OPTIONS = frozenset(
+    {"--block-signal", "--default-signal", "--ignore-signal"}
+)
+ENV_SPLIT_OPTIONS = frozenset({"-S", "--split-string"})
+ENV_BOOLEAN_OPTIONS = frozenset(
+    {
+        "-i",
+        "-v",
+        "--debug",
+        "--ignore-environment",
+        "--list-signal-handling",
+    }
+)
+ENV_TERMINAL_OPTIONS = frozenset({"-0", "--help", "--null", "--version"})
+
+
+def _consume_env_wrapper(tokens: list[str]) -> _EnvConsumption | None:
+    if not tokens or Path(tokens[0]).name != "env":
+        return None
     environment: dict[str, str] = {}
+    unset_variables: set[str] = set()
+    clear_environment = False
+    repository_scope_changed = False
+    working_directory = None
+    split_command = None
+    index = 1
+    options_done = False
+    while index < len(tokens):
+        token = tokens[index]
+        if not options_done and token == "-":
+            clear_environment = True
+            index += 1
+            continue
+        if not options_done and token == "--":
+            options_done = True
+            index += 1
+            continue
+        if not options_done and token.startswith("-") and token != "-":
+            if token in ENV_TERMINAL_OPTIONS:
+                return None
+            if token in ENV_SPLIT_OPTIONS:
+                if index + 1 >= len(tokens):
+                    return None
+                split_command = tokens[index + 1]
+                index += 2
+                break
+            attached_split = _attached_option(token, ENV_SPLIT_OPTIONS)
+            if attached_split:
+                split_command = _attached_option_argument(token, attached_split)
+                index += 1
+                break
+            if token in ENV_VALUE_OPTIONS:
+                if index + 1 >= len(tokens):
+                    return None
+                value = tokens[index + 1]
+                if token in {"-u", "--unset"}:
+                    unset_variables.add(value)
+                else:
+                    repository_scope_changed = True
+                    working_directory = value
+                index += 2
+                continue
+            attached_value = _attached_option(token, ENV_VALUE_OPTIONS)
+            if attached_value:
+                value = _attached_option_argument(token, attached_value)
+                if attached_value in {"-u", "--unset"}:
+                    unset_variables.add(value)
+                else:
+                    repository_scope_changed = True
+                    working_directory = value
+                index += 1
+                continue
+            if token in ENV_OPTIONAL_INLINE_VALUE_OPTIONS or _attached_option(
+                token, ENV_OPTIONAL_INLINE_VALUE_OPTIONS
+            ):
+                index += 1
+                continue
+            if token in ENV_BOOLEAN_OPTIONS:
+                if token in {"-i", "--ignore-environment"}:
+                    clear_environment = True
+                index += 1
+                continue
+            if token.startswith("-") and not token.startswith("--") and len(token) > 2:
+                offset = 1
+                cluster_valid = True
+                while offset < len(token):
+                    option = f"-{token[offset]}"
+                    if option == "-0":
+                        return None
+                    if option in {"-i", "-v"}:
+                        if option == "-i":
+                            clear_environment = True
+                        offset += 1
+                        continue
+                    if option in {"-C", "-S", "-u"}:
+                        value = token[offset + 1 :]
+                        next_index = index + 1
+                        if not value:
+                            if next_index >= len(tokens):
+                                return None
+                            value = tokens[next_index]
+                            next_index += 1
+                        if option == "-u":
+                            unset_variables.add(value)
+                        elif option == "-C":
+                            repository_scope_changed = True
+                            working_directory = value
+                        else:
+                            split_command = value
+                        index = next_index
+                        break
+                    cluster_valid = False
+                    break
+                if not cluster_valid:
+                    return None
+                if offset >= len(token):
+                    index += 1
+                if split_command is not None:
+                    break
+                continue
+            return None
+        match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", token, re.S)
+        if not match:
+            break
+        environment[match.group(1)] = match.group(2)
+        index += 1
+    return _EnvConsumption(
+        span=index,
+        environment=environment,
+        unset_variables=frozenset(unset_variables),
+        clear_environment=clear_environment,
+        repository_scope_changed=repository_scope_changed,
+        working_directory=working_directory,
+        split_command=split_command,
+    )
+
+
+def _resolved_working_directory(current: str | None, value: str | None) -> str | None:
+    if not value or _dynamic_shell_value(value):
+        return None
+    if os.path.isabs(value):
+        return os.path.normpath(value)
+    if current is None:
+        return None
+    return os.path.normpath(os.path.join(current, value))
+
+
+def _apply_env_consumption(
+    context: _ExecutionContext, consumption: _EnvConsumption
+) -> _ExecutionContext:
+    environment = dict(context.environment)
+    host_environment_reset = context.host_environment_reset
+    host_environment_uncertain = context.host_environment_uncertain
+    if consumption.clear_environment:
+        environment.clear()
+        host_environment_reset = True
+        host_environment_uncertain = False
+    for name in consumption.unset_variables:
+        environment.pop(name, None)
+        if name == "GH_HOST":
+            host_environment_reset = True
+            host_environment_uncertain = False
+    environment.update(consumption.environment)
+    working_directory = context.working_directory
+    if consumption.repository_scope_changed:
+        working_directory = _resolved_working_directory(
+            working_directory, consumption.working_directory
+        )
+    return _ExecutionContext(
+        environment=environment,
+        read_success_coupled=context.read_success_coupled,
+        repository_scope_changed=(
+            context.repository_scope_changed or consumption.repository_scope_changed
+        ),
+        host_environment_reset=host_environment_reset,
+        host_environment_uncertain=host_environment_uncertain,
+        working_directory=working_directory,
+    )
+
+
+def _apply_wrapper_consumption(
+    context: _ExecutionContext, consumption: _WrapperConsumption
+) -> _ExecutionContext:
+    environment = dict(context.environment)
+    repository_scope_changed = context.repository_scope_changed
+    host_environment_reset = context.host_environment_reset
+    host_environment_uncertain = context.host_environment_uncertain
+    if consumption.scrubs_environment and not consumption.preserve_all_environment:
+        preserved = consumption.preserved_environment
+        if "GH_REPO" in environment and "GH_REPO" not in preserved:
+            environment.pop("GH_REPO", None)
+            repository_scope_changed = True
+        if "GH_HOST" in environment and "GH_HOST" not in preserved:
+            environment.pop("GH_HOST", None)
+            host_environment_reset = False
+            host_environment_uncertain = True
+        environment = {
+            name: value for name, value in environment.items() if name in preserved
+        }
+    command_environment = consumption.command_environment or {}
+    environment.update(command_environment)
+    if "GH_HOST" in command_environment:
+        host_environment_uncertain = False
+    working_directory = context.working_directory
+    if consumption.working_directory_changed:
+        working_directory = _resolved_working_directory(
+            working_directory, consumption.working_directory
+        )
+    return _ExecutionContext(
+        environment=environment,
+        read_success_coupled=(
+            context.read_success_coupled and consumption.read_success_coupled
+        ),
+        repository_scope_changed=(
+            repository_scope_changed or consumption.repository_scope_changed
+        ),
+        host_environment_reset=host_environment_reset,
+        host_environment_uncertain=host_environment_uncertain,
+        working_directory=working_directory,
+    )
+
+
+def _inline_environment(
+    prefix: list[str], initial: _ExecutionContext | None = None
+) -> _ExecutionContext | None:
+    remaining = list(prefix)
+    context = initial or _ExecutionContext(environment={})
+    environment = dict(context.environment)
     index = 0
     while index < len(remaining):
+        match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", remaining[index], re.S)
+        if not match:
+            break
+        environment[match.group(1)] = match.group(2)
+        index += 1
+    context = _ExecutionContext(
+        environment=environment,
+        read_success_coupled=context.read_success_coupled,
+        repository_scope_changed=context.repository_scope_changed,
+        host_environment_reset=context.host_environment_reset,
+        host_environment_uncertain=context.host_environment_uncertain,
+        working_directory=context.working_directory,
+    )
+    if index < len(remaining) and remaining[index] in {"command", "exec"}:
+        index += 1
+    while index < len(remaining):
         token = remaining[index]
-        match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", token, re.S)
-        if match:
-            environment[match.group(1)] = match.group(2)
-            index += 1
+        if Path(token).name == "env":
+            env_consumption = _consume_env_wrapper(remaining[index:])
+            if env_consumption is None or env_consumption.split_command is not None:
+                return None
+            context = _apply_env_consumption(context, env_consumption)
+            index += env_consumption.span
             continue
         consumed = _consume_exec_wrapper(remaining[index:], EXEC_THROUGH_WRAPPERS)
         if consumed is None:
-            return {}, False
-        index += consumed
-    return environment, True
+            return None
+        context = _apply_wrapper_consumption(context, consumed)
+        index += consumed.span
+    return context
 
 
 @dataclass(frozen=True)
@@ -1037,72 +1670,59 @@ def _shell_command_argument(tokens: list[str], shell_index: int) -> str | None:
     return None
 
 
-def _inline_shell_environment(prefix: list[_ShellWord]) -> bool:
+def _inline_shell_environment(
+    prefix: list[_ShellWord], initial: _ExecutionContext | None = None
+) -> _ExecutionContext | None:
     remaining = list(prefix)
+    context = initial or _ExecutionContext(environment={})
+    environment = dict(context.environment)
+    while remaining and remaining[0].assignment:
+        match = re.fullmatch(
+            r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", remaining.pop(0).value, re.S
+        )
+        if match:
+            environment[match.group(1)] = match.group(2)
+    context = _ExecutionContext(
+        environment=environment,
+        read_success_coupled=context.read_success_coupled,
+        repository_scope_changed=context.repository_scope_changed,
+        host_environment_reset=context.host_environment_reset,
+        host_environment_uncertain=context.host_environment_uncertain,
+        working_directory=context.working_directory,
+    )
+    shell_builtin_allowed = True
     while True:
-        while remaining and remaining[0].assignment:
-            remaining.pop(0)
         if not remaining:
-            return True
+            return context
 
         wrapper = Path(remaining[0].value).name
         if wrapper == "env":
-            remaining.pop(0)
-            value_options = {
-                "-C",
-                "-u",
-                "--block-signal",
-                "--chdir",
-                "--default-signal",
-                "--ignore-signal",
-                "--unset",
-            }
-            boolean_options = {
-                "-0",
-                "-i",
-                "-v",
-                "--debug",
-                "--ignore-environment",
-                "--null",
-            }
-            while remaining:
-                token = remaining[0].value
-                if token == "--":
-                    remaining.pop(0)
-                    break
-                if token in value_options:
-                    if len(remaining) < 2:
-                        return False
-                    del remaining[:2]
-                    continue
-                if (
-                    token in boolean_options
-                    or any(token.startswith(f"{option}=") for option in value_options)
-                    or (len(token) > 2 and token.startswith(("-C", "-u")))
-                ):
-                    remaining.pop(0)
-                    continue
-                break
-            # env sets NAME=value operands verbatim regardless of shell quoting.
-            while remaining and re.fullmatch(
-                r"[A-Za-z_][A-Za-z0-9_]*=.*", remaining[0].value, re.S
-            ):
-                remaining.pop(0)
+            env_consumption = _consume_env_wrapper([word.value for word in remaining])
+            if env_consumption is None or env_consumption.split_command is not None:
+                return None
+            context = _apply_env_consumption(context, env_consumption)
+            del remaining[: env_consumption.span]
+            shell_builtin_allowed = False
             continue
 
         if wrapper == "command":
+            if not shell_builtin_allowed:
+                return None
             remaining.pop(0)
             while remaining and remaining[0].value.startswith("-"):
                 token = remaining.pop(0).value
                 if token in {"-V", "-v"}:
-                    return False
+                    return None
                 if token == "--":
                     break
                 if token != "-p":
-                    return False
+                    return None
+            shell_builtin_allowed = False
             continue
 
         if wrapper == "exec":
+            if not shell_builtin_allowed:
+                return None
             remaining.pop(0)
             while remaining and remaining[0].value.startswith("-"):
                 token = remaining.pop(0).value
@@ -1110,11 +1730,12 @@ def _inline_shell_environment(prefix: list[_ShellWord]) -> bool:
                     break
                 if token == "-a":
                     if not remaining:
-                        return False
+                        return None
                     remaining.pop(0)
                     continue
                 if token not in {"-c", "-l"}:
-                    return False
+                    return None
+            shell_builtin_allowed = False
             continue
 
         consumed = _consume_exec_wrapper(
@@ -1122,11 +1743,17 @@ def _inline_shell_environment(prefix: list[_ShellWord]) -> bool:
             EXEC_THROUGH_WRAPPERS | SHELL_ONLY_EXEC_WRAPPERS,
         )
         if consumed is None:
-            return False
-        del remaining[:consumed]
+            return None
+        context = _apply_wrapper_consumption(context, consumed)
+        del remaining[: consumed.span]
+        shell_builtin_allowed = False
 
 
-def _executable_shell_position(words: list[_ShellWord], shell_index: int) -> bool:
+def _executable_shell_position(
+    words: list[_ShellWord],
+    shell_index: int,
+    initial: _ExecutionContext | None = None,
+) -> _ExecutionContext | None:
     segment_start = 0
     for index in range(shell_index - 1, -1, -1):
         word = words[index]
@@ -1151,56 +1778,131 @@ def _executable_shell_position(words: list[_ShellWord], shell_index: int) -> boo
         if prefix and prefix[0].unquoted and prefix[0].value == "{":
             prefix.pop(0)
             changed = True
-    return _inline_shell_environment(prefix)
+    return _inline_shell_environment(prefix, initial)
 
 
 def _segments_containing_gh(
-    command: str, *, depth: int = 0
-) -> Iterable[tuple[list[str], bool]]:
+    command: str,
+    *,
+    depth: int = 0,
+    env_expansion_depth: int = 0,
+    read_context_eligible: bool = True,
+    initial: _ExecutionContext | None = None,
+) -> Iterable[tuple[list[str], bool, _ExecutionContext]]:
+    initial = initial or _ExecutionContext(environment={})
     tokens = _tokenize_shell(command)
     if depth < MAX_NESTED_SHELL_DEPTH:
         for substitution in _command_substitutions(command):
-            yield from _segments_containing_gh(substitution, depth=depth + 1)
+            yield from _segments_containing_gh(
+                substitution,
+                depth=depth + 1,
+                env_expansion_depth=env_expansion_depth,
+                read_context_eligible=read_context_eligible,
+                initial=initial,
+            )
         shell_words = _tokenize_shell_words(command)
         shell_tokens = [word.value for word in shell_words]
         for index, word in enumerate(shell_words):
             if Path(word.value).name not in {"bash", "dash", "ksh", "sh", "zsh"}:
                 continue
-            if not _executable_shell_position(shell_words, index):
+            shell_context = _executable_shell_position(shell_words, index, initial)
+            if shell_context is None:
                 continue
             nested_command = _shell_command_argument(shell_tokens, index)
             if nested_command is not None:
-                yield from _segments_containing_gh(nested_command, depth=depth + 1)
+                yield from _segments_containing_gh(
+                    nested_command,
+                    depth=depth + 1,
+                    env_expansion_depth=env_expansion_depth,
+                    read_context_eligible=read_context_eligible,
+                    initial=shell_context,
+                )
     elif re.search(r"(?:^|[\s;&|(`])(?:[^\s;&|()]*/)?gh(?:\s|$)", command):
         # A pathological wrapper chain should fail closed instead of hiding a
         # command merely because the defensive recursion budget was exhausted.
-        yield ["gh", "unknown", "nested-shell"], False
+        yield ["gh", "unknown", "nested-shell"], False, initial
     has_control_operator = any(
         token and set(token) <= {";", "&", "|", "\n"} for token in tokens
     )
-    gh_count = sum(1 for token in tokens if _gh_token(token))
     segment: list[str] = []
     for token in tokens + [";"]:
         if token and set(token) <= {";", "&", "|", "\n"}:
-            gh_index = next(
-                (index for index, part in enumerate(segment) if _gh_token(part)), None
-            )
-            if gh_index is not None:
-                inline_environment, executable_prefix = _inline_environment(
-                    segment[:gh_index]
-                )
-                if not executable_prefix:
-                    segment = []
+            if env_expansion_depth < MAX_NESTED_SHELL_DEPTH:
+                for env_index, part in enumerate(segment):
+                    if Path(part).name != "env":
+                        continue
+                    prefix_context = _inline_environment(segment[:env_index], initial)
+                    if prefix_context is None:
+                        continue
+                    env_consumption = _consume_env_wrapper(segment[env_index:])
+                    if (
+                        env_consumption is None
+                        or env_consumption.split_command is None
+                        or any(
+                            marker in env_consumption.split_command
+                            for marker in ("$", "`")
+                        )
+                    ):
+                        continue
+                    try:
+                        split_tokens = shlex.split(env_consumption.split_command)
+                    except ValueError:
+                        continue
+                    split_context = _apply_env_consumption(
+                        prefix_context, env_consumption
+                    )
+                    remainder = segment[env_index + env_consumption.span :]
+                    expanded = [*split_tokens, *remainder]
+                    if not expanded:
+                        continue
+                    yield from _segments_containing_gh(
+                        shlex.join(["env", *expanded]),
+                        depth=depth,
+                        env_expansion_depth=env_expansion_depth + 1,
+                        read_context_eligible=(
+                            read_context_eligible and not has_control_operator
+                        ),
+                        initial=split_context,
+                    )
+                    break
+            candidates: list[tuple[int, _ExecutionContext]] = []
+            for gh_index, part in enumerate(segment):
+                if not _gh_token(part):
                     continue
+                context = _inline_environment(segment[:gh_index], initial)
+                if context is not None:
+                    candidates.append((gh_index, context))
+            if candidates:
+                gh_index, context = candidates[0]
                 normalized = ["gh"] + segment[gh_index + 1 :]
-                if "GH_REPO" in inline_environment:
-                    normalized.extend(["--repo", inline_environment["GH_REPO"]])
-                if "GH_HOST" in inline_environment:
-                    normalized.extend(["--hostname", inline_environment["GH_HOST"]])
+                if (
+                    "GH_REPO" in context.environment
+                    and _flag_value(normalized, "--repo", "-R") is None
+                ):
+                    normalized.extend(["--repo", context.environment["GH_REPO"]])
+                if (
+                    "GH_HOST" in context.environment
+                    and _flag_value(normalized, "--hostname") is None
+                ):
+                    normalized.extend(["--hostname", context.environment["GH_HOST"]])
+                elif (
+                    context.host_environment_uncertain
+                    and _flag_value(normalized, "--hostname") is None
+                ):
+                    normalized.extend(["--hostname", "$SECQUOIA_WRAPPER_UNKNOWN_HOST"])
+                elif (
+                    context.host_environment_reset
+                    and _flag_value(normalized, "--hostname") is None
+                ):
+                    normalized.extend(["--hostname", "github.com"])
                 read_eligible = (
-                    depth == 0 and not has_control_operator and gh_count == 1
+                    depth == 0
+                    and read_context_eligible
+                    and not has_control_operator
+                    and len(candidates) == 1
+                    and context.read_success_coupled
                 )
-                yield normalized, read_eligible
+                yield normalized, read_eligible, context
             segment = []
         else:
             segment.append(token)
@@ -1727,15 +2429,35 @@ def _repo_and_target(tokens: list[str], cwd: str) -> tuple[str, str, str]:
 
 def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
     operations: list[GhOperation] = []
-    for tokens, read_eligible in _segments_containing_gh(command):
+    ambient_environment = {
+        name: os.environ[name] for name in ("GH_HOST", "GH_REPO") if name in os.environ
+    }
+    initial_context = _ExecutionContext(
+        environment=ambient_environment,
+        working_directory=os.path.abspath(cwd),
+    )
+    for tokens, read_eligible, context in _segments_containing_gh(
+        command, initial=initial_context
+    ):
         if len(tokens) < 2:
             continue
+        operation_cwd = (
+            context.working_directory
+            if context.working_directory is not None
+            else "/__secquoia_unknown_working_directory__"
+        )
+        if (
+            context.repository_scope_changed
+            and "GH_REPO" not in context.environment
+            and not _has_explicit_repository_scope(tokens, operation_cwd)
+        ):
+            tokens = [*tokens, "--repo", "$SECQUOIA_WRAPPER_CWD"]
         group = tokens[1]
         action = tokens[2] if len(tokens) > 2 else ""
         if group in IGNORED_GROUPS:
             continue
         if group == "api":
-            kind = _api_kind(tokens, cwd)
+            kind = _api_kind(tokens, operation_cwd)
         elif action in WRITE_ACTIONS.get(group, set()):
             kind = "write"
         elif action in READ_ACTIONS.get(group, set()):
@@ -1743,13 +2465,13 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
         else:
             kind = "unknown"
         dynamic_scope = _operation_has_dynamic_scope(tokens)
-        repo, target, label = _repo_and_target(tokens, cwd)
+        repo, target, label = _repo_and_target(tokens, operation_cwd)
         hostname = _flag_value(tokens, "--hostname") or os.environ.get(
             "GH_HOST", "github.com"
         )
         normalized_host = hostname.strip().lower() or "unknown-host"
         repo_key = f"github:{normalized_host}:{repo}"
-        explicit_scope = _has_explicit_repository_scope(tokens, cwd)
+        explicit_scope = _has_explicit_repository_scope(tokens, operation_cwd)
         operations.append(
             GhOperation(
                 kind=kind,
