@@ -204,9 +204,20 @@ GH_VALUE_FLAGS = FLAGS_WITH_VALUES | {
     "-q",
     "-t",
 }
-# Deliberately absent: short flags that are boolean on targeted actions
-# ("-s"/"-m" mean --squash/--merge on gh pr merge). The pr/issue number
-# preference below keys those forms correctly either way.
+
+# Short-flag arity is action-specific in gh. For example, -a is a value for
+# `pr edit` but boolean --approve for `pr review`; -f is a GraphQL field but
+# boolean --force for `pr checkout`; and -m is a milestone value for edit but
+# boolean --merge for `pr merge`.
+GH_ACTION_BOOLEAN_FLAGS = {
+    ("pr", "checkout"): {"-f"},
+    ("pr", "merge"): {"-m", "-s"},
+    ("pr", "review"): {"-a"},
+}
+GH_ACTION_VALUE_FLAGS = {
+    ("issue", "edit"): {"-m"},
+    ("pr", "edit"): {"-m"},
+}
 
 
 @dataclass(frozen=True)
@@ -272,7 +283,24 @@ def _migrate_legacy_hook_state(connection: sqlite3.Connection) -> None:
         if _current_turn_id(raw_turn):
             turn_id = raw_turn
         elif raw_turn == raw_session:
-            turn_id = "root:epoch:0"
+            session = connection.execute(
+                "SELECT epoch FROM hook_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            epoch = int(session["epoch"]) if session else 0
+            turn_id = f"root:epoch:{epoch}"
+            if session:
+                # Pruning runs immediately after migration. Keep a current
+                # session row alive when a newer legacy activity row proves
+                # that the session is still active.
+                connection.execute(
+                    """
+                    UPDATE hook_sessions
+                    SET updated_at = MAX(updated_at, ?)
+                    WHERE session_id = ?
+                    """,
+                    (row["updated_at"], session_id),
+                )
         else:
             turn_id = f"root:{_runtime_id('turn', raw_turn)}"
         connection.execute(
@@ -715,7 +743,7 @@ def _command_substitutions(command: str) -> Iterable[str]:
 
 def _inline_environment(prefix: list[str]) -> tuple[dict[str, str], bool]:
     remaining = list(prefix)
-    if remaining and remaining[0] in {"command", "env"}:
+    if remaining and remaining[0] in {"command", "env", "exec"}:
         remaining.pop(0)
     environment: dict[str, str] = {}
     for token in remaining:
@@ -726,6 +754,302 @@ def _inline_environment(prefix: list[str]) -> tuple[dict[str, str], bool]:
     return environment, True
 
 
+@dataclass(frozen=True)
+class _ShellWord:
+    value: str
+    unquoted: bool
+    command_boundary: bool = False
+    assignment: bool = False
+
+
+def _tokenize_shell_words(command: str) -> list[_ShellWord]:
+    """Tokenize enough shell grammar to retain reserved-word quote context."""
+    words: list[_ShellWord] = []
+    value: list[str] = []
+    character_unquoted: list[bool] = []
+    active = False
+    entirely_unquoted = True
+    quoted_before_equals = False
+    saw_equals = False
+    quote = ""
+    case_modes: list[str] = []
+    at_command_start = True
+
+    def observe_word(word: _ShellWord) -> None:
+        nonlocal at_command_start
+        if case_modes and word.unquoted and word.value == "esac":
+            case_modes.pop()
+            at_command_start = False
+            return
+        if case_modes and case_modes[-1] == "seek-in":
+            if word.unquoted and word.value == "in":
+                case_modes[-1] = "pattern"
+            return
+        if case_modes and case_modes[-1] == "pattern":
+            return
+        if not at_command_start:
+            return
+        if word.assignment:
+            return
+        if word.unquoted and word.value == "case":
+            case_modes.append("seek-in")
+            at_command_start = False
+            return
+        command_prefixes = {
+            "!",
+            "do",
+            "elif",
+            "else",
+            "if",
+            "then",
+            "time",
+            "until",
+            "while",
+            "{",
+        }
+        if word.unquoted and word.value in command_prefixes:
+            return
+        at_command_start = False
+
+    def flush() -> None:
+        nonlocal active, entirely_unquoted, quoted_before_equals, saw_equals
+        if active:
+            text = "".join(value)
+            equals = text.find("=")
+            assignment = (
+                equals > 0
+                and character_unquoted[equals]
+                and not quoted_before_equals
+                and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", text[:equals]) is not None
+            )
+            word = _ShellWord(text, entirely_unquoted, assignment=assignment)
+            words.append(word)
+            observe_word(word)
+        value.clear()
+        character_unquoted.clear()
+        active = False
+        entirely_unquoted = True
+        quoted_before_equals = False
+        saw_equals = False
+
+    def append_character(char: str, *, unquoted: bool) -> None:
+        nonlocal active, entirely_unquoted, quoted_before_equals, saw_equals
+        if not saw_equals and not unquoted:
+            quoted_before_equals = True
+        value.append(char)
+        character_unquoted.append(unquoted)
+        active = True
+        if not unquoted:
+            entirely_unquoted = False
+        if char == "=" and not saw_equals:
+            saw_equals = True
+
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if quote:
+            if char == quote:
+                quote = ""
+                index += 1
+                continue
+            if quote == '"' and char == "\\" and index + 1 < len(command):
+                index += 1
+                char = command[index]
+            append_character(char, unquoted=False)
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            active = True
+            entirely_unquoted = False
+            if not saw_equals:
+                quoted_before_equals = True
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(command):
+            if command[index + 1] == "\n":
+                index += 2
+                continue
+            index += 1
+            append_character(command[index], unquoted=False)
+            index += 1
+            continue
+        if char in " \t\r":
+            flush()
+            index += 1
+            continue
+        if char == "\n":
+            flush()
+            words.append(_ShellWord("\n", True, True))
+            at_command_start = True
+            index += 1
+            continue
+        if case_modes and case_modes[-1] == "pattern" and char == ")":
+            flush()
+            words.append(_ShellWord(")", True, True))
+            case_modes[-1] = "command"
+            at_command_start = True
+            index += 1
+            continue
+        if case_modes and case_modes[-1] == "pattern" and char == "|":
+            append_character(char, unquoted=True)
+            index += 1
+            continue
+        if char in ";&|":
+            flush()
+            end = index + 1
+            while end < len(command) and command[end] in ";&|":
+                end += 1
+            punctuation = command[index:end]
+            words.append(_ShellWord(punctuation, True, True))
+            if (
+                case_modes
+                and case_modes[-1] == "command"
+                and punctuation in {";;", ";&", ";;&"}
+            ):
+                case_modes[-1] = "pattern"
+            at_command_start = True
+            index = end
+            continue
+        append_character(char, unquoted=True)
+        index += 1
+    flush()
+    return words
+
+
+def _shell_command_argument(tokens: list[str], shell_index: int) -> str | None:
+    """Return the command following a shell's effective -c option."""
+    value_options = {"-o", "+o", "-O", "+O", "--init-file", "--rcfile"}
+    index = shell_index + 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in value_options:
+            index += 2
+            continue
+        if token.startswith(("-o", "+o", "-O", "+O")) and len(token) > 2:
+            index += 1
+            continue
+        if token.startswith(("--init-file=", "--rcfile=")):
+            index += 1
+            continue
+        if token == "--":
+            return None
+        if token.startswith("-") and not token.startswith("--") and "c" in token[1:]:
+            return tokens[index + 1] if index + 1 < len(tokens) else None
+        if token.startswith("-"):
+            index += 1
+            continue
+        return None
+    return None
+
+
+def _inline_shell_environment(prefix: list[_ShellWord]) -> bool:
+    remaining = list(prefix)
+    while remaining and remaining[0].assignment:
+        remaining.pop(0)
+    if not remaining:
+        return True
+
+    wrapper = Path(remaining.pop(0).value).name
+    if wrapper == "env":
+        value_options = {
+            "-C",
+            "-u",
+            "--block-signal",
+            "--chdir",
+            "--default-signal",
+            "--ignore-signal",
+            "--unset",
+        }
+        boolean_options = {
+            "-0",
+            "-i",
+            "-v",
+            "--debug",
+            "--ignore-environment",
+            "--null",
+        }
+        while remaining:
+            token = remaining[0].value
+            if token == "--":
+                remaining.pop(0)
+                break
+            if token in value_options:
+                if len(remaining) < 2:
+                    return False
+                del remaining[:2]
+                continue
+            if (
+                token in boolean_options
+                or any(token.startswith(f"{option}=") for option in value_options)
+                or (len(token) > 2 and token.startswith(("-C", "-u")))
+            ):
+                remaining.pop(0)
+                continue
+            break
+        return all(
+            re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", word.value, re.S) is not None
+            for word in remaining
+        )
+
+    if wrapper == "command":
+        if any(word.value in {"-V", "-v"} for word in remaining):
+            return False
+        for index, word in enumerate(remaining):
+            if word.value == "--":
+                return index == len(remaining) - 1
+            if word.value != "-p":
+                return False
+        return True
+
+    if wrapper == "exec":
+        index = 0
+        while index < len(remaining):
+            token = remaining[index].value
+            if token == "--":
+                return index == len(remaining) - 1
+            if token == "-a":
+                if index + 1 >= len(remaining):
+                    return False
+                index += 2
+                continue
+            if token in {"-c", "-l"}:
+                index += 1
+                continue
+            return False
+        return True
+
+    return False
+
+
+def _executable_shell_position(words: list[_ShellWord], shell_index: int) -> bool:
+    segment_start = 0
+    for index in range(shell_index - 1, -1, -1):
+        word = words[index]
+        if word.command_boundary:
+            segment_start = index + 1
+            break
+    prefix = words[segment_start:shell_index]
+    reserved_prefixes = {"!", "do", "elif", "else", "if", "then", "until", "while"}
+    changed = True
+    while changed:
+        changed = False
+        while (
+            prefix
+            and prefix[0].unquoted
+            and prefix[0].value in reserved_prefixes | {"time"}
+        ):
+            reserved = prefix.pop(0).value
+            changed = True
+            if reserved == "time":
+                while prefix and prefix[0].value.startswith("-"):
+                    prefix.pop(0)
+        if prefix and prefix[0].unquoted and prefix[0].value == "{":
+            prefix.pop(0)
+            changed = True
+    return _inline_shell_environment(prefix)
+
+
 def _segments_containing_gh(
     command: str, *, depth: int = 0
 ) -> Iterable[tuple[list[str], bool]]:
@@ -733,13 +1057,16 @@ def _segments_containing_gh(
     if depth < MAX_NESTED_SHELL_DEPTH:
         for substitution in _command_substitutions(command):
             yield from _segments_containing_gh(substitution, depth=depth + 1)
-        for index, token in enumerate(tokens[:-2]):
-            if Path(token).name in {"bash", "dash", "ksh", "sh", "zsh"}:
-                option = tokens[index + 1]
-                if option.startswith("-") and "c" in option[1:]:
-                    yield from _segments_containing_gh(
-                        tokens[index + 2], depth=depth + 1
-                    )
+        shell_words = _tokenize_shell_words(command)
+        shell_tokens = [word.value for word in shell_words]
+        for index, word in enumerate(shell_words):
+            if Path(word.value).name not in {"bash", "dash", "ksh", "sh", "zsh"}:
+                continue
+            if not _executable_shell_position(shell_words, index):
+                continue
+            nested_command = _shell_command_argument(shell_tokens, index)
+            if nested_command is not None:
+                yield from _segments_containing_gh(nested_command, depth=depth + 1)
     elif re.search(r"(?:^|[\s;&|(`])(?:[^\s;&|()]*/)?gh(?:\s|$)", command):
         # A pathological wrapper chain should fail closed instead of hiding a
         # command merely because the defensive recursion budget was exhausted.
@@ -889,24 +1216,62 @@ def _graphql_operation_text(query: str) -> str:
 
 def _graphql_operations(query: str) -> list[tuple[str, str | None]]:
     tokens = re.findall(
-        r"[A-Za-z_][A-Za-z0-9_]*|[{}()]", _graphql_operation_text(query)
+        r"\$[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*|[{}()\[\]@]",
+        _graphql_operation_text(query),
     )
     operations: list[tuple[str, str | None]] = []
-    depth = 0
+    at_definition_boundary = True
+    in_header = False
+    selection_depth = 0
+    parenthesis_depth = 0
+    bracket_depth = 0
     for index, token in enumerate(tokens):
-        if token == "{":
-            if depth == 0 and not operations:
+        if selection_depth:
+            if token == "{":
+                selection_depth += 1
+            elif token == "}":
+                selection_depth -= 1
+                if selection_depth == 0:
+                    at_definition_boundary = True
+            continue
+
+        lowered = token.lower()
+        if at_definition_boundary:
+            if token == "{":
                 operations.append(("query", None))
-            depth += 1
-        elif token == "}":
-            depth = max(0, depth - 1)
-        elif depth == 0 and token.lower() in {"mutation", "query", "subscription"}:
-            name = None
-            if index + 1 < len(tokens) and re.fullmatch(
-                r"[A-Za-z_][A-Za-z0-9_]*", tokens[index + 1]
-            ):
-                name = tokens[index + 1]
-            operations.append((token.lower(), name))
+                selection_depth = 1
+                at_definition_boundary = False
+            elif lowered in {"mutation", "query", "subscription"}:
+                name = None
+                if index + 1 < len(tokens) and re.fullmatch(
+                    r"[A-Za-z_][A-Za-z0-9_]*", tokens[index + 1]
+                ):
+                    name = tokens[index + 1]
+                operations.append((lowered, name))
+                at_definition_boundary = False
+                in_header = True
+                parenthesis_depth = 0
+                bracket_depth = 0
+            elif lowered == "fragment":
+                at_definition_boundary = False
+                in_header = True
+                parenthesis_depth = 0
+                bracket_depth = 0
+            continue
+
+        if not in_header:
+            continue
+        if token == "(":
+            parenthesis_depth += 1
+        elif token == ")":
+            parenthesis_depth = max(0, parenthesis_depth - 1)
+        elif token == "[":
+            bracket_depth += 1
+        elif token == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+        elif token == "{" and parenthesis_depth == 0 and bracket_depth == 0:
+            selection_depth = 1
+            in_header = False
     return operations or [("query", None)]
 
 
@@ -960,12 +1325,15 @@ def _api_kind(tokens: list[str], cwd: str) -> str:
             # visible top-level mutation keyword still marks a write so the
             # readback rule tracks it. Anything else stays unknown: it can
             # neither authorize nor count.
-            if any(
-                any(kind == "mutation" for kind, _ in _graphql_operations(query))
-                for query, _ in queries
-                if query
-            ):
-                return "write"
+            for query, _ in queries:
+                if not query:
+                    continue
+                if operation_name_known:
+                    visible_kind = _graphql_operation_kind(query, operation_name)
+                    if visible_kind == "mutation":
+                        return "write"
+                elif any(kind == "mutation" for kind, _ in _graphql_operations(query)):
+                    return "write"
             return "unknown"
         if any(
             _graphql_operation_kind(query, operation_name) in {"mutation", "unknown"}
@@ -1080,12 +1448,16 @@ def _graphql_target(tokens: list[str], cwd: str, repo: str) -> tuple[str, str, s
     return repo, f"graphql:{_target_digest(scope)}", f"{repo}:graphql"
 
 
-def _positional_candidates(tokens: list[str]) -> list[str]:
+def _positional_candidates(tokens: list[str], group: str, action: str) -> list[str]:
     candidates: list[str] = []
+    boolean_flags = GH_ACTION_BOOLEAN_FLAGS.get((group, action), set())
+    value_flags = (
+        GH_VALUE_FLAGS | GH_ACTION_VALUE_FLAGS.get((group, action), set())
+    ) - boolean_flags
     index = 3
     while index < len(tokens):
         token = tokens[index]
-        if token in GH_VALUE_FLAGS:
+        if token in value_flags:
             index += 2
             continue
         if token.startswith("-"):
@@ -1099,7 +1471,7 @@ def _positional_candidates(tokens: list[str]) -> list[str]:
 def _immediate_target(tokens: list[str], group: str, action: str) -> str | None:
     if action not in TARGETED_ACTIONS.get(group, set()):
         return None
-    candidates = _positional_candidates(tokens)
+    candidates = _positional_candidates(tokens, group, action)
     for candidate in candidates:
         if re.search(r"https?://", candidate):
             return candidate
@@ -1609,6 +1981,10 @@ def _pre_tool_use(
     ]
     revision = skill_revision() if writes else ""
     with _write_transaction(connection):
+        # A still-running pre-upgrade hook can write raw identifiers after
+        # connect-time migration. Absorb them under the same writer lock as
+        # this event so its state transition cannot race past pending work.
+        _migrate_legacy_hook_state(connection)
         turn_id = _turn_id(connection, payload, remember_tool=True)
         violations = [
             op
@@ -1694,6 +2070,7 @@ def _post_tool_use(
     successful = _successful_response(payload, agent)
     revision = skill_revision() if successful and operations else ""
     with _write_transaction(connection):
+        _migrate_legacy_hook_state(connection)
         correlated = (
             agent != "claude"
             or bool(payload.get("turn_id") or payload.get("prompt_id"))
@@ -1807,6 +2184,7 @@ def _finalize_session_activity(
 ) -> list[str]:
     current_revision = revision or skill_revision()
     with _write_transaction(connection):
+        _migrate_legacy_hook_state(connection)
         pending = connection.execute(
             """
             SELECT * FROM hook_activity
@@ -1850,6 +2228,7 @@ def _stop(
     session_id, _, _ = _payload_context(payload)
     revision = skill_revision()
     with _write_transaction(connection):
+        _migrate_legacy_hook_state(connection)
         turn_id = _turn_id(connection, payload)
         pending = (
             _pending_for_session(connection, session_id)
@@ -1913,6 +2292,7 @@ def _user_prompt_submit(
     revision = skill_revision()
     # Rotation and cleanup are one serialized boundary transition.
     with _write_transaction(connection):
+        _migrate_legacy_hook_state(connection)
         _advance_session_epoch(connection, session_id)
         labels = _finalize_session_activity(
             connection,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import shlex
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -10,6 +11,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = (
@@ -335,6 +337,29 @@ class EncounterLedgerTests(unittest.TestCase):
     def test_nested_shell_github_writes_are_detected(self):
         commands = (
             "bash -lc 'gh pr comment 11 --repo owner/repo --body done'",
+            "bash --noprofile -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "bash -o pipefail -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "if bash -c 'gh pr comment 11 --repo owner/repo --body done'; then :; fi",
+            "! bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "time bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "time -p bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "case x in x) bash -c 'gh pr comment 11 --repo owner/repo --body done' ;; esac",
+            "case x in x)bash -c 'gh pr comment 11 --repo owner/repo --body done' ;; esac",
+            "case x in x|y) bash -c 'gh pr comment 11 --repo owner/repo --body done' ;; esac",
+            "case x in x) time bash -c 'gh pr comment 11 --repo owner/repo --body done' ;; esac",
+            "{ bash -c 'gh pr comment 11 --repo owner/repo --body done'; }",
+            "{ time bash -c 'gh pr comment 11 --repo owner/repo --body done'; }",
+            "{ ! bash -c 'gh pr comment 11 --repo owner/repo --body done'; }",
+            "NOTE='two words' bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "env 'NOTE=two words' bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "env NOTE\\=two bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "NOTE=two env -i EXTRA=three bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "env -uNOTE bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "env -C/tmp bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "NOTE=two command -p bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "command -p -- bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "NOTE=two exec -l bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "exec -c -- bash -c 'gh pr comment 11 --repo owner/repo --body done'",
             'sh -c "gh issue edit 12 --repo owner/repo --title fixed"',
             "env zsh -lc 'gh release delete v1.0 --repo owner/repo --yes'",
             'printf "%s" "$(gh pr edit 13 --repo owner/repo --title fixed)"',
@@ -348,6 +373,26 @@ class EncounterLedgerTests(unittest.TestCase):
                 operations = ledger.classify_gh_operations(command, "/tmp")
                 self.assertEqual(len(operations), 1)
                 self.assertEqual(operations[0].kind, "write")
+
+        for harmless in (
+            "echo bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "echo '(' bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "echo ')' bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "echo '{' bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "'case' x in x) bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "'{' bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "'NOTE=two words' bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "NOTE\\=two bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "NO''TE=two bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "env NOTE=two echo bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "command -v bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "command -- -p bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "exec -a bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "exec -a bash echo bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+            "exec -- -c bash -c 'gh pr comment 11 --repo owner/repo --body done'",
+        ):
+            with self.subTest(harmless=harmless):
+                self.assertEqual(ledger.classify_gh_operations(harmless, "/tmp"), [])
 
     def test_graphql_number_targets_do_not_bridge_to_cli_prs(self):
         bound_query = Path(self.temporary.name) / "bound-pr.graphql"
@@ -1062,6 +1107,191 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertEqual(legacy_rows, 0)
         self.assertEqual(escaped, 1)
 
+    def test_legacy_claude_fallback_turn_uses_the_existing_session_epoch(self):
+        legacy_session_id = "legacy-session-with-current-epoch"
+        hashed_session_id = ledger._runtime_id("session", legacy_session_id)
+        stale = ledger.isoformat(ledger.utc_now() - timedelta(days=31))
+        fresh = ledger.isoformat(ledger.utc_now())
+        write = "gh pr comment 62 --repo owner/repo --body done"
+        operation = ledger.classify_gh_operations(write, "/tmp")[0]
+        connection = self.connection()
+        try:
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO hook_sessions (session_id, epoch, updated_at)
+                    VALUES (?, 5, ?)
+                    """,
+                    (hashed_session_id, stale),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO hook_activity (
+                        session_id, turn_id, workflow_key, workflow_label,
+                        repo_key, preflight_seen, pending_write,
+                        pending_summary, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?)
+                    """,
+                    (
+                        legacy_session_id,
+                        legacy_session_id,
+                        operation.workflow_key,
+                        operation.workflow_label,
+                        operation.repo_key,
+                        operation.summary,
+                        fresh,
+                    ),
+                )
+        finally:
+            connection.close()
+
+        stop = ledger.run_hook(
+            {
+                "session_id": legacy_session_id,
+                "cwd": "/tmp",
+                "hook_event_name": "Stop",
+                "stop_hook_active": False,
+            },
+            agent="claude",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+
+        self.assertIn("systemMessage", stop)
+        connection = self.connection()
+        try:
+            activity_count = connection.execute(
+                "SELECT COUNT(*) FROM hook_activity"
+            ).fetchone()[0]
+            session = connection.execute(
+                "SELECT epoch, updated_at FROM hook_sessions WHERE session_id = ?",
+                (hashed_session_id,),
+            ).fetchone()
+            escaped = connection.execute(
+                """
+                SELECT COUNT(*) FROM encounters
+                WHERE rule_id = 'GH-WRITE-READBACK-001'
+                  AND workflow_label = ? AND outcome = 'escaped'
+                """,
+                (operation.workflow_label,),
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(activity_count, 0)
+        self.assertIsNotNone(session)
+        self.assertEqual(session["epoch"], 5)
+        self.assertEqual(session["updated_at"], fresh)
+        self.assertEqual(escaped, 1)
+
+    def test_event_transaction_absorbs_a_legacy_write_after_connect(self):
+        legacy_session_id = "legacy-session-racing-stop"
+        hashed_session_id = ledger._runtime_id("session", legacy_session_id)
+        now = ledger.isoformat(ledger.utc_now())
+        write = "gh pr comment 63 --repo owner/repo --body done"
+        operation = ledger.classify_gh_operations(write, "/tmp")[0]
+        connection = self.connection()
+        try:
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO hook_sessions (session_id, epoch, updated_at)
+                    VALUES (?, 4, ?)
+                    """,
+                    (hashed_session_id, now),
+                )
+        finally:
+            connection.close()
+
+        original_connect = ledger.connect_database
+        injected = False
+
+        def connect_then_inject(state_dir):
+            nonlocal injected
+            current = original_connect(state_dir)
+            if injected:
+                return current
+            legacy = sqlite3.connect(Path(state_dir) / "encounters.sqlite3", timeout=2)
+            try:
+                legacy.execute(
+                    """
+                    INSERT INTO hook_activity (
+                        session_id, turn_id, workflow_key, workflow_label,
+                        repo_key, preflight_seen, pending_write,
+                        pending_summary, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?)
+                    """,
+                    (
+                        legacy_session_id,
+                        legacy_session_id,
+                        operation.workflow_key,
+                        operation.workflow_label,
+                        operation.repo_key,
+                        operation.summary,
+                        now,
+                    ),
+                )
+                legacy.commit()
+            finally:
+                legacy.close()
+            injected = True
+            return current
+
+        payload = {
+            "session_id": legacy_session_id,
+            "cwd": "/tmp",
+            "hook_event_name": "Stop",
+            "stop_hook_active": False,
+        }
+        with mock.patch.object(
+            ledger, "connect_database", side_effect=connect_then_inject
+        ):
+            stop = ledger.run_hook(
+                payload,
+                agent="claude",
+                mode="enforce",
+                explicit_state_dir=self.state_dir,
+            )
+
+        self.assertEqual(stop["decision"], "block")
+        connection = self.connection()
+        try:
+            raw_rows = connection.execute(
+                """
+                SELECT COUNT(*) FROM hook_activity
+                WHERE session_id = ? OR turn_id = ?
+                """,
+                (legacy_session_id, legacy_session_id),
+            ).fetchone()[0]
+            migrated = connection.execute(
+                """
+                SELECT COUNT(*) FROM hook_activity
+                WHERE session_id = ? AND turn_id = 'root:epoch:4'
+                  AND pending_write = 1
+                """,
+                (hashed_session_id,),
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(raw_rows, 0)
+        self.assertEqual(migrated, 1)
+
+        escaped = ledger.run_hook(
+            payload | {"stop_hook_active": True},
+            agent="claude",
+            mode="enforce",
+            explicit_state_dir=self.state_dir,
+        )
+        self.assertNotIn("decision", escaped)
+        self.assertIn("systemMessage", escaped)
+        connection = self.connection()
+        try:
+            activity_count = connection.execute(
+                "SELECT COUNT(*) FROM hook_activity"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(activity_count, 0)
+
     def test_codex_recovers_pending_state_when_the_next_turn_has_a_new_id(self):
         read = "gh pr view 62 --repo owner/repo --json state"
         write = "gh pr comment 62 --repo owner/repo --body done"
@@ -1226,13 +1456,86 @@ class EncounterLedgerTests(unittest.TestCase):
         cases = (
             ("gh pr merge -s 11 --repo owner/repo", "owner/repo#11"),
             ("gh pr merge -m 11 --repo owner/repo", "owner/repo#11"),
-            ("gh issue edit -m v1 12 --repo owner/repo", "owner/repo#12"),
+            ("gh pr review -a 11 --repo owner/repo", "owner/repo#11"),
+            ("gh pr checkout -f 11 --repo owner/repo", "owner/repo#11"),
+            ("gh issue edit -m 12 99 --repo owner/repo", "owner/repo#99"),
+            ("gh issue edit 99 -m 12 --repo owner/repo", "owner/repo#99"),
+            ("gh pr edit -m 12 99 --repo owner/repo", "owner/repo#99"),
+            ("gh pr edit 99 -m 12 --repo owner/repo", "owner/repo#99"),
             ("gh pr view --json state 11 --repo owner/repo", "owner/repo#11"),
         )
         for command, label in cases:
             with self.subTest(command=command):
                 operation = ledger.classify_gh_operations(command, "/tmp")[0]
                 self.assertEqual(operation.workflow_label, label)
+
+        no_target = ledger.classify_gh_operations(
+            "gh pr checks -i 5 --repo owner/repo", "/tmp"
+        )[0]
+        explicit_target = ledger.classify_gh_operations(
+            "gh pr checks -i 5 11 --repo owner/repo", "/tmp"
+        )[0]
+        self.assertNotEqual(no_target.workflow_label, "owner/repo#5")
+        self.assertEqual(explicit_target.workflow_label, "owner/repo#11")
+
+    def test_action_specific_flag_arity_preserves_exact_authorization(self):
+        wrong_read = "gh issue view 12 --repo owner/repo --json state"
+        right_read = "gh issue view 99 --repo owner/repo --json state"
+        issue_write = "gh issue edit -m 12 99 --repo owner/repo --title fixed"
+        pr_read = "gh pr view 11 --repo owner/repo --json state"
+        pr_review = "gh pr review -a 11 --repo owner/repo"
+        pr_checkout = "gh pr checkout -f 11 --repo owner/repo"
+
+        wrong_state = str(Path(self.state_dir) / "wrong-milestone-target")
+        ledger.run_hook(
+            hook_payload("PostToolUse", wrong_read, {"exit_code": 0}),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=wrong_state,
+        )
+        denied = ledger.run_hook(
+            hook_payload("PreToolUse", issue_write),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=wrong_state,
+        )
+        self.assertIn("systemMessage", denied)
+
+        right_state = str(Path(self.state_dir) / "right-milestone-target")
+        ledger.run_hook(
+            hook_payload("PostToolUse", right_read, {"exit_code": 0}),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=right_state,
+        )
+        self.assertIsNone(
+            ledger.run_hook(
+                hook_payload("PreToolUse", issue_write),
+                agent="codex",
+                mode="audit",
+                explicit_state_dir=right_state,
+            )
+        )
+
+        state_dir = str(Path(self.state_dir) / "pr-review-approve")
+        ledger.run_hook(
+            hook_payload("PostToolUse", pr_read, {"exit_code": 0}),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=state_dir,
+        )
+        self.assertIsNone(
+            ledger.run_hook(
+                hook_payload("PreToolUse", pr_review),
+                agent="codex",
+                mode="audit",
+                explicit_state_dir=state_dir,
+            )
+        )
+        self.assertEqual(
+            ledger.classify_gh_operations(pr_checkout, "/tmp")[0].workflow_key,
+            ledger.classify_gh_operations(pr_read, "/tmp")[0].workflow_key,
+        )
 
     def test_inline_variable_mutations_are_tracked_as_writes(self):
         command = (
@@ -1247,6 +1550,44 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertEqual(
             ledger.classify_gh_operations(opaque, "/tmp")[0].kind, "unknown"
         )
+
+    def test_inline_graphql_selection_ignores_non_operation_mutation_tokens(self):
+        mixed = (
+            "query Q($mutation:String){viewer{login}} "
+            "mutation M($input:CloseIssueInput!){"
+            "closeIssue(input:$input){clientMutationId}}"
+        )
+        selected_query = ledger.classify_gh_operations(
+            f"gh api graphql -f operationName=Q -f 'query={mixed}'", "/tmp"
+        )[0]
+        selected_mutation = ledger.classify_gh_operations(
+            f"gh api graphql -f operationName=M -f 'query={mixed}'", "/tmp"
+        )[0]
+        unselected = ledger.classify_gh_operations(
+            f"gh api graphql -f 'query={mixed}'", "/tmp"
+        )[0]
+        named_mutation = ledger.classify_gh_operations(
+            "gh api graphql -f 'query=query mutation { viewer { login } }'",
+            "/tmp",
+        )[0]
+        fragment_named_mutation = ledger.classify_gh_operations(
+            "gh api graphql -f 'query=fragment mutation on User { login } "
+            "query Q { viewer { ...mutation } }'",
+            "/tmp",
+        )[0]
+        anonymous_directive = ledger.classify_gh_operations(
+            "gh api graphql -f 'query=query @trace { viewer { login } }'",
+            "/tmp",
+        )[0]
+
+        self.assertEqual(selected_query.kind, "unknown")
+        self.assertFalse(selected_query.read_eligible)
+        self.assertEqual(selected_mutation.kind, "write")
+        self.assertFalse(selected_mutation.read_eligible)
+        self.assertEqual(unselected.kind, "write")
+        self.assertEqual(named_mutation.kind, "read")
+        self.assertEqual(fragment_named_mutation.kind, "read")
+        self.assertEqual(anonymous_directive.kind, "read")
 
     def test_codex_hook_install_is_idempotent_and_preserves_other_hooks(self):
         codex_home = Path(self.temporary.name) / "codex"
