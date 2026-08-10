@@ -627,7 +627,9 @@ def _normalize_repo(value: str) -> str:
     return value or "unknown-repo"
 
 
-def _repo_from_cwd(cwd: str) -> str:
+def _repo_from_cwd(cwd: str | None) -> str:
+    if cwd is None:
+        return "unknown-repo"
     try:
         result = subprocess.run(
             ["git", "-C", cwd, "config", "--get", "remote.origin.url"],
@@ -796,20 +798,18 @@ class _ExecutionContext:
     working_directory: str | None = None
 
 
-# Sentinels injected into the normalized token stream when a wrapper leaves
-# repository scope, hostname, or working directory unknowable. The leading "$"
-# routes them through _dynamic_shell_value, so an operation carrying one can
-# never be read-eligible or serve as exact-scope evidence. The sentinel is
-# stable text on purpose: identically wrapped retries normalize to the same
-# workflow key and dedupe into one episode. Verification stays fail-closed —
+# Token sentinels represent repository scope or hostname that a wrapper makes
+# unknowable. Their leading "$" routes them through _dynamic_shell_value, so an
+# operation carrying one can never be read-eligible or exact-scope evidence.
+# The text is stable on purpose: identically wrapped retries normalize to the
+# same workflow key and dedupe into one episode. Verification stays fail-closed —
 # no eligible read can ever share a sentinel key, so a host- or scope-scrubbed
 # write keeps its readback obligation until the turn escapes; rerun the write
-# without the scrubbing wrapper (or with sudo -E) to make it verifiable. The
-# working-directory sentinel is a path that cannot exist, so relative @file
-# reads under an unknown cwd fail closed to "unknown".
+# without the scrubbing wrapper (or with sudo -E) to make it verifiable.
+# Unknown working directories remain None instead of becoming a filesystem
+# path: relative @file inputs then fail closed without touching the filesystem.
 WRAPPER_UNKNOWN_HOST_SENTINEL = "$SECQUOIA_WRAPPER_UNKNOWN_HOST"
 WRAPPER_CWD_SENTINEL = "$SECQUOIA_WRAPPER_CWD"
-UNKNOWN_WORKING_DIRECTORY = "/__secquoia_unknown_working_directory__"
 
 # These wrappers execute a following command, but only when their option grammar
 # is known. Unknown options fail closed: guessing whether they consume a value
@@ -1952,7 +1952,7 @@ def _flag_values(tokens: list[str], *names: str) -> Iterable[str]:
                 yield token[len(name) :].removeprefix("=")
 
 
-def _read_query_value(value: str, cwd: str) -> tuple[str, bool]:
+def _read_query_value(value: str, cwd: str | None) -> tuple[str, bool]:
     if not value.startswith("@"):
         # Interpolated text is kept so classification can still spot a
         # top-level mutation keyword, but it is never "known": it cannot
@@ -1962,6 +1962,8 @@ def _read_query_value(value: str, cwd: str) -> tuple[str, bool]:
         return "", False
     path = Path(value[1:])
     if not path.is_absolute():
+        if cwd is None:
+            return "", False
         path = Path(cwd) / path
     try:
         if path.stat().st_size > 128_000:
@@ -1978,7 +1980,7 @@ def _dynamic_shell_value(value: str | None) -> bool:
 
 
 def _graphql_input_document(
-    tokens: list[str], cwd: str
+    tokens: list[str], cwd: str | None
 ) -> tuple[dict[str, Any] | None, bool]:
     input_value = _flag_value(tokens, "--input")
     if not input_value:
@@ -1987,6 +1989,8 @@ def _graphql_input_document(
         return None, False
     path = Path(input_value)
     if not path.is_absolute():
+        if cwd is None:
+            return None, False
         path = Path(cwd) / path
     try:
         if path.stat().st_size > 128_000:
@@ -1997,7 +2001,7 @@ def _graphql_input_document(
     return (document, True) if isinstance(document, dict) else (None, False)
 
 
-def _graphql_query_texts(tokens: list[str], cwd: str) -> list[tuple[str, bool]]:
+def _graphql_query_texts(tokens: list[str], cwd: str | None) -> list[tuple[str, bool]]:
     queries: list[tuple[str, bool]] = []
     for field in _flag_values(tokens, "-f", "-F", "--field", "--raw-field"):
         key, separator, value = field.partition("=")
@@ -2015,7 +2019,9 @@ def _graphql_query_texts(tokens: list[str], cwd: str) -> list[tuple[str, bool]]:
     return [(query, True)] if isinstance(query, str) else [("", False)]
 
 
-def _graphql_operation_name(tokens: list[str], cwd: str) -> tuple[str | None, bool]:
+def _graphql_operation_name(
+    tokens: list[str], cwd: str | None
+) -> tuple[str | None, bool]:
     values: list[str] = []
     for field in _flag_values(tokens, "-f", "-F", "--field", "--raw-field"):
         key, separator, value = field.partition("=")
@@ -2138,7 +2144,7 @@ def _api_endpoint(tokens: list[str]) -> str:
     return ""
 
 
-def _api_kind(tokens: list[str], cwd: str) -> str:
+def _api_kind(tokens: list[str], cwd: str | None) -> str:
     method_value = _flag_value(tokens, "--method", "-X") or ""
     if _dynamic_shell_value(method_value):
         return "unknown"
@@ -2198,7 +2204,7 @@ def _target_digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:20]
 
 
-def _graphql_bound_target_fields(tokens: list[str], cwd: str) -> set[str]:
+def _graphql_bound_target_fields(tokens: list[str], cwd: str | None) -> set[str]:
     queries = _graphql_query_texts(tokens, cwd)
     if len(queries) != 1 or not queries[0][1]:
         return set()
@@ -2241,7 +2247,9 @@ def _graphql_bound_target_fields(tokens: list[str], cwd: str) -> set[str]:
     return bound_fields
 
 
-def _graphql_target(tokens: list[str], cwd: str, repo: str) -> tuple[str, str, str]:
+def _graphql_target(
+    tokens: list[str], cwd: str | None, repo: str
+) -> tuple[str, str, str]:
     fields = _graphql_fields(tokens)
     bound_fields = _graphql_bound_target_fields(tokens, cwd)
     owner, name = fields.get("owner"), fields.get("name")
@@ -2340,7 +2348,7 @@ def _operation_has_dynamic_scope(tokens: list[str]) -> bool:
     return _dynamic_shell_value(_immediate_target(tokens, group, action))
 
 
-def _has_explicit_repository_scope(tokens: list[str], cwd: str) -> bool:
+def _has_explicit_repository_scope(tokens: list[str], cwd: str | None) -> bool:
     explicit_repo = _flag_value(tokens, "--repo", "-R")
     if explicit_repo and not _dynamic_shell_value(explicit_repo):
         return True
@@ -2386,7 +2394,7 @@ def _has_explicit_repository_scope(tokens: list[str], cwd: str) -> bool:
     )
 
 
-def _repo_and_target(tokens: list[str], cwd: str) -> tuple[str, str, str]:
+def _repo_and_target(tokens: list[str], cwd: str | None) -> tuple[str, str, str]:
     explicit_repo = _flag_value(tokens, "--repo", "-R")
     if _dynamic_shell_value(explicit_repo):
         return (
@@ -2462,11 +2470,7 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
     ):
         if len(tokens) < 2:
             continue
-        operation_cwd = (
-            context.working_directory
-            if context.working_directory is not None
-            else UNKNOWN_WORKING_DIRECTORY
-        )
+        operation_cwd = context.working_directory
         if (
             context.repository_scope_changed
             and "GH_REPO" not in context.environment

@@ -594,7 +594,6 @@ class EncounterLedgerTests(unittest.TestCase):
             ledger._dynamic_shell_value(ledger.WRAPPER_UNKNOWN_HOST_SENTINEL)
         )
         self.assertTrue(ledger._dynamic_shell_value(ledger.WRAPPER_CWD_SENTINEL))
-        self.assertFalse(Path(ledger.UNKNOWN_WORKING_DIRECTORY).exists())
 
         write = ledger.classify_gh_operations(
             "GH_HOST=ghe.example.com sudo "
@@ -638,19 +637,46 @@ class EncounterLedgerTests(unittest.TestCase):
             "mutation Change { addComment(input:{}) { clientMutationId } }",
             encoding="utf-8",
         )
+        (source / "request.json").write_text(
+            json.dumps({"query": "query Current { viewer { login } }"}),
+            encoding="utf-8",
+        )
 
         operation = ledger.classify_gh_operations(
             f"env -C {shlex.quote(str(target))} gh api graphql "
             "-f query=@request.graphql --repo owner/repo",
             str(source),
         )[0]
-        unknown_cwd = ledger.classify_gh_operations(
-            "sudo --login gh api graphql -f query=@request.graphql --repo owner/repo",
-            str(source),
-        )[0]
+        with (
+            mock.patch.object(
+                ledger.Path,
+                "stat",
+                side_effect=AssertionError("unknown cwd must not stat relative files"),
+            ),
+            mock.patch.object(
+                ledger.Path,
+                "read_text",
+                side_effect=AssertionError("unknown cwd must not read relative files"),
+            ),
+        ):
+            unknown_cwd = ledger.classify_gh_operations(
+                "sudo --login gh api graphql "
+                "-f query=@request.graphql --repo owner/repo",
+                str(source),
+            )[0]
+            unknown_input = ledger.classify_gh_operations(
+                "sudo --login gh api graphql --input request.json --repo owner/repo",
+                str(source),
+            )[0]
         absolute_query = ledger.classify_gh_operations(
             "sudo --login gh api graphql "
             f"-f query=@{shlex.quote(str(source / 'request.graphql'))} "
+            "--repo owner/repo",
+            str(source),
+        )[0]
+        absolute_input = ledger.classify_gh_operations(
+            "sudo --login gh api graphql "
+            f"--input {shlex.quote(str(source / 'request.json'))} "
             "--repo owner/repo",
             str(source),
         )[0]
@@ -658,11 +684,18 @@ class EncounterLedgerTests(unittest.TestCase):
             "sudo --login gh api graphql -f query=@- --repo owner/repo",
             str(source),
         )[0]
+        with mock.patch.object(ledger.subprocess, "run") as git:
+            self.assertEqual(ledger._repo_from_cwd(None), "unknown-repo")
+            git.assert_not_called()
 
         self.assertEqual(operation.kind, "write")
         self.assertEqual(operation.repo_key, "github:github.com:owner/repo")
         self.assertEqual(unknown_cwd.kind, "unknown")
+        self.assertFalse(unknown_cwd.read_eligible)
+        self.assertEqual(unknown_input.kind, "unknown")
+        self.assertFalse(unknown_input.read_eligible)
         self.assertEqual(absolute_query.kind, "read")
+        self.assertEqual(absolute_input.kind, "read")
         self.assertEqual(stdin_query.kind, "unknown")
 
     def test_exec_wrapper_grammar_rejects_nonexecuting_prefixes(self):
