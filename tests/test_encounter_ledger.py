@@ -1117,7 +1117,7 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertEqual(pending, 0)
         self.assertEqual(escaped, 1)
 
-    def test_enforcement_denial_has_no_post_and_stop_keeps_blocking_pending(self):
+    def test_enforcement_denial_has_no_post_and_stop_blocks_once(self):
         write = "gh issue comment 12 --repo owner/repo --body done"
         denied = ledger.run_hook(
             hook_payload("PreToolUse", write),
@@ -1166,7 +1166,87 @@ class EncounterLedgerTests(unittest.TestCase):
             mode="enforce",
             explicit_state_dir=self.state_dir,
         )
-        self.assertEqual(final_stop["decision"], "block")
+        self.assertNotIn("decision", final_stop)
+        self.assertIn("systemMessage", final_stop)
+        cleared = ledger.run_hook(
+            hook_payload("Stop"),
+            agent="codex",
+            mode="enforce",
+            explicit_state_dir=self.state_dir,
+        )
+        self.assertEqual(cleared, {})
+
+    def test_flags_before_the_target_key_the_same_exact_object(self):
+        read = "gh pr view --repo owner/repo 11 --json state"
+        write = "gh pr comment --repo owner/repo 11 --body done"
+        canonical = "gh pr view 11 --repo owner/repo --json state"
+        read_operation = ledger.classify_gh_operations(read, "/tmp")[0]
+        write_operation = ledger.classify_gh_operations(write, "/tmp")[0]
+        canonical_operation = ledger.classify_gh_operations(canonical, "/tmp")[0]
+        self.assertEqual(read_operation.workflow_key, canonical_operation.workflow_key)
+        self.assertEqual(write_operation.workflow_key, canonical_operation.workflow_key)
+        self.assertEqual(write_operation.workflow_label, "owner/repo#11")
+        self.assertTrue(read_operation.read_eligible)
+
+        ledger.run_hook(
+            hook_payload("PostToolUse", read, {"exit_code": 0}),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        self.assertIsNone(
+            ledger.run_hook(
+                hook_payload("PreToolUse", write),
+                agent="codex",
+                mode="audit",
+                explicit_state_dir=self.state_dir,
+            )
+        )
+        ledger.run_hook(
+            hook_payload("PostToolUse", write, {"exit_code": 0}),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        ledger.run_hook(
+            hook_payload("PostToolUse", read, {"exit_code": 0}),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        stop = ledger.run_hook(
+            hook_payload("Stop"),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        self.assertEqual(stop, {})
+
+    def test_boolean_short_flags_before_the_number_keep_the_target(self):
+        cases = (
+            ("gh pr merge -s 11 --repo owner/repo", "owner/repo#11"),
+            ("gh pr merge -m 11 --repo owner/repo", "owner/repo#11"),
+            ("gh issue edit -m v1 12 --repo owner/repo", "owner/repo#12"),
+            ("gh pr view --json state 11 --repo owner/repo", "owner/repo#11"),
+        )
+        for command, label in cases:
+            with self.subTest(command=command):
+                operation = ledger.classify_gh_operations(command, "/tmp")[0]
+                self.assertEqual(operation.workflow_label, label)
+
+    def test_inline_variable_mutations_are_tracked_as_writes(self):
+        command = (
+            "gh api graphql -f query='mutation($input:CloseIssueInput!) "
+            "{ closeIssue(input:$input) { clientMutationId } }'"
+        )
+        operation = ledger.classify_gh_operations(command, "/tmp")[0]
+        self.assertEqual(operation.kind, "write")
+        self.assertFalse(operation.read_eligible)
+
+        opaque = "gh api graphql -f 'query=$GENERATED_QUERY'"
+        self.assertEqual(
+            ledger.classify_gh_operations(opaque, "/tmp")[0].kind, "unknown"
+        )
 
     def test_codex_hook_install_is_idempotent_and_preserves_other_hooks(self):
         codex_home = Path(self.temporary.name) / "codex"
@@ -1851,7 +1931,7 @@ class ClaudeHookTests(unittest.TestCase):
                     "the boundary/Post race silently discarded the pending write",
                 )
 
-    def test_claude_enforcement_denial_has_no_post_and_stop_keeps_blocking(self):
+    def test_claude_enforcement_denial_has_no_post_and_stop_blocks_once(self):
         session_id = "claude-enforcement"
         write = "gh issue comment 12 --repo owner/repo --body done"
         denied = self.run_hook(
@@ -1897,7 +1977,14 @@ class ClaudeHookTests(unittest.TestCase):
             claude_payload("Stop", session_id=session_id, stop_hook_active=True),
             mode="enforce",
         )
-        self.assertEqual(reentry["decision"], "block")
+        self.assertNotIn("decision", reentry)
+        self.assertIn("systemMessage", reentry)
+        self.assert_readback_escaped("owner/repo#12")
+        cleared = self.run_hook(
+            claude_payload("Stop", session_id=session_id, stop_hook_active=False),
+            mode="enforce",
+        )
+        self.assertEqual(cleared, {})
 
     def test_claude_and_codex_share_one_ledger_episode(self):
         write = "gh pr comment 11 --repo owner/repo --body done"

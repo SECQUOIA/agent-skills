@@ -31,7 +31,6 @@ DEFAULT_DEDUPE_HOURS = 24
 DEFAULT_REPORT_DAYS = 30
 DEFAULT_MIN_ENCOUNTERS = 3
 HOOK_STATE_RETENTION_DAYS = 30
-HOOK_SCHEMA_VERSION = 1
 MAX_NESTED_SHELL_DEPTH = 32
 OUTCOME_RANK = {"passed": 0, "prevented": 1, "escaped": 2}
 
@@ -153,6 +152,62 @@ FLAGS_WITH_VALUES = {
     "-X",
 }
 
+# Common gh flags that consume the next token as their value. Positional
+# target extraction must skip these so a flag placed before the target
+# ("gh pr comment --repo o/r 11") keys the same object as the flag-after
+# form ("gh pr comment 11 --repo o/r").
+GH_VALUE_FLAGS = FLAGS_WITH_VALUES | {
+    "--add-assignee",
+    "--add-label",
+    "--add-project",
+    "--add-reviewer",
+    "--assignee",
+    "--attempt",
+    "--author",
+    "--base",
+    "--branch",
+    "--category",
+    "--color",
+    "--discussion-category",
+    "--head",
+    "--interval",
+    "--job",
+    "--json",
+    "--label",
+    "--limit",
+    "--milestone",
+    "--notes",
+    "--notes-file",
+    "--output",
+    "--pattern",
+    "--project",
+    "--reason",
+    "--ref",
+    "--remove-assignee",
+    "--remove-label",
+    "--remove-project",
+    "--remove-reviewer",
+    "--reviewer",
+    "--search",
+    "--state",
+    "--subject",
+    "--tag",
+    "-A",
+    "-B",
+    "-L",
+    "-S",
+    "-a",
+    "-b",
+    "-i",
+    "-l",
+    "-n",
+    "-q",
+    "-t",
+}
+# Deliberately absent: short flags that are boolean on targeted actions
+# ("-s"/"-m" mean --squash/--merge on gh pr merge). The pr/issue number
+# preference below keys those forms correctly either way.
+
 
 @dataclass(frozen=True)
 class GhOperation:
@@ -189,7 +244,13 @@ def _current_turn_id(value: str) -> bool:
 
 
 def _migrate_legacy_hook_state(connection: sqlite3.Connection) -> None:
-    """Replace pre-hashing lifecycle identifiers without losing pending state."""
+    """Replace pre-hashing lifecycle identifiers without losing pending state.
+
+    This runs on every connect by design: a mixed-version window (one agent on
+    an older script writing raw identifiers into the shared ledger) can add
+    legacy rows to an already-migrated database, and the 30-day pruning keeps
+    the scanned table small.
+    """
     rows = connection.execute("SELECT * FROM hook_activity").fetchall()
     legacy_rows = [
         row
@@ -198,7 +259,6 @@ def _migrate_legacy_hook_state(connection: sqlite3.Connection) -> None:
         or not _current_turn_id(str(row["turn_id"]))
     ]
     if not legacy_rows:
-        connection.execute(f"PRAGMA user_version = {HOOK_SCHEMA_VERSION}")
         return
 
     for row in legacy_rows:
@@ -256,7 +316,6 @@ def _migrate_legacy_hook_state(connection: sqlite3.Connection) -> None:
             """,
             (raw_session, raw_turn, row["workflow_key"]),
         )
-    connection.execute(f"PRAGMA user_version = {HOOK_SCHEMA_VERSION}")
 
 
 def state_directory(explicit: str | None = None) -> Path:
@@ -741,7 +800,10 @@ def _flag_values(tokens: list[str], *names: str) -> Iterable[str]:
 
 def _read_query_value(value: str, cwd: str) -> tuple[str, bool]:
     if not value.startswith("@"):
-        return ("", False) if "$" in value or "`" in value else (value, True)
+        # Interpolated text is kept so classification can still spot a
+        # top-level mutation keyword, but it is never "known": it cannot
+        # authorize a write or bind an exact target.
+        return value, "$" not in value and "`" not in value
     if value == "@-":
         return "", False
     path = Path(value[1:])
@@ -894,6 +956,16 @@ def _api_kind(tokens: list[str], cwd: str) -> str:
         queries = _graphql_query_texts(tokens, cwd)
         operation_name, operation_name_known = _graphql_operation_name(tokens, cwd)
         if not operation_name_known or any(not known for _, known in queries):
+            # Shell interpolation makes the exact request uncertain, but a
+            # visible top-level mutation keyword still marks a write so the
+            # readback rule tracks it. Anything else stays unknown: it can
+            # neither authorize nor count.
+            if any(
+                any(kind == "mutation" for kind, _ in _graphql_operations(query))
+                for query, _ in queries
+                if query
+            ):
+                return "write"
             return "unknown"
         if any(
             _graphql_operation_kind(query, operation_name) in {"mutation", "unknown"}
@@ -1008,11 +1080,36 @@ def _graphql_target(tokens: list[str], cwd: str, repo: str) -> tuple[str, str, s
     return repo, f"graphql:{_target_digest(scope)}", f"{repo}:graphql"
 
 
+def _positional_candidates(tokens: list[str]) -> list[str]:
+    candidates: list[str] = []
+    index = 3
+    while index < len(tokens):
+        token = tokens[index]
+        if token in GH_VALUE_FLAGS:
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        candidates.append(token)
+        index += 1
+    return candidates
+
+
 def _immediate_target(tokens: list[str], group: str, action: str) -> str | None:
-    if action not in TARGETED_ACTIONS.get(group, set()) or len(tokens) < 4:
+    if action not in TARGETED_ACTIONS.get(group, set()):
         return None
-    candidate = tokens[3]
-    return None if candidate.startswith("-") else candidate
+    candidates = _positional_candidates(tokens)
+    for candidate in candidates:
+        if re.search(r"https?://", candidate):
+            return candidate
+    if group in {"pr", "issue"}:
+        # Prefer a definite number so an unrecognized value flag's argument
+        # ("--json state 11") cannot displace the numbered target.
+        for candidate in candidates:
+            if re.fullmatch(r"\d+", candidate):
+                return candidate
+    return candidates[0] if candidates else None
 
 
 def _operation_has_dynamic_scope(tokens: list[str]) -> bool:
@@ -1771,7 +1868,12 @@ def _stop(
                 _clear_turn_state(connection, session_id, turn_id)
             return {}
 
-        should_block = mode == "enforce"
+        # Block at most once per stop attempt: stop_hook_active marks the
+        # re-entry after a prior block, and blocking again would loop an agent
+        # that cannot perform the readback (for example, gh became
+        # unavailable). The re-entry downgrades to an escape with an advisory.
+        already_continued = bool(payload.get("stop_hook_active"))
+        should_block = mode == "enforce" and not already_continued
         outcome = "prevented" if should_block else "escaped"
         for row in pending:
             record_encounter(
