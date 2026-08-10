@@ -25,7 +25,13 @@ Consult them on symptoms, not only upfront. The moment a command surprises you â
   `events`), or emit a locally extracted hostname with the path and query
   removed. If a credential-bearing URL is accidentally emitted, do not repeat
   it; tell the user and recommend rotating or recreating the integration before
-  relying on it.
+  relying on it. Apply that same response to any credential emitted without
+  your having pasted it: reading a live value back out of the software under
+  test is the usual route, since a getter can return an ambient `*_TOKEN` the
+  environment supplied rather than one the caller set. Before posting a body
+  that quotes command output, scan the assembled payload for the environment's
+  secret values instead of trusting the transcript, and re-scan the object
+  after the write.
 - If `gh` is not on `PATH` and the shell reports `gh: command not found`, do not conclude `gh` is unavailable under WSL/Linux: check `PATH` (or `/mnt/c/Program Files/GitHub CLI/gh.exe`) for a Windows `gh.exe` and use it. Quote the full path because it contains a space, and set it once per command (shell variables do not persist across separate tool calls). Confirm it is authenticated with `gh auth status` before relying on it.
 - Treat `gh auth status` as a diagnostic, not the sole authentication gate. If it reports an invalid token but a narrow explicit-repository read such as `gh pr view <N> --repo OWNER/REPO` or `gh api repos/OWNER/REPO` succeeds, use the successful API operation as current-session evidence and continue; do not force reauthentication. If the narrow read also fails, follow the network-escalation rule before classifying it as an authentication failure.
 - If Windows `gh.exe` runs Git against a WSL checkout and fails with Git's `detected dubious ownership` safe-directory error, do not blindly add a global safe.directory entry. First verify whether the local branch is already the intended PR head (`git rev-parse HEAD` equals `headRefOid`) and clean; if so, treat checkout as satisfied and continue with local Git plus `gh` API calls. Only change Git trust configuration when the workflow truly needs Windows-side Git to operate on that checkout.
