@@ -41,7 +41,11 @@ Consult them on symptoms, not only upfront. The moment a command surprises you �
   Markdown heading are parsed as JSON and fail with errors like `invalid
   character '#' looking for beginning of value`. Either request raw content
   without `--jq`, or request the normal contents JSON and decode its `.content`
-  field.
+  field. For any read filtered through shell stages (`gh api ... | nl | sed`),
+  enable `set -o pipefail` or capture and check `gh` separately. Otherwise an
+  upstream transport or authentication failure can print its error while the
+  final filter exits zero, making unavailable content look empty. Do not treat
+  zero matches as absence evidence until the `gh` read itself succeeded.
 - When passing GraphQL queries or other file-backed values to `gh api`, always use a typed file field such as `-F query=@<file>`: lowercase `-f` / `--raw-field` sends the literal `@<file>` string, and an inline `-f query='...'` multi-line string is easily mangled by the shell — both fail with parser errors like `Expected NAME, actual: (none)`.
 - For a bulk GraphQL mutation over many objects — resolving every addressed review thread before a merge is the common case — write one mutation document with one aliased field per target (`t01: resolveReviewThread(input:{threadId:"..."}){thread{id isResolved}} t02: ...`) and send it once with `-F query=@<file>`. One aliased document is fewer round trips than a shell loop of single mutations, and a loop of write commands can be blocked wholesale by command-approval tooling that accepts the single reviewable document. Check each alias's result in the response instead of assuming all-or-nothing.
 - When reading the same GraphQL object before and after a mutation, reuse the previously successful query text and change only its variables instead of hand-simplifying the readback. If the mutation succeeds but the readback query has a parse or schema error, do not repeat the mutation; correct the query and verify the result before any later write.
