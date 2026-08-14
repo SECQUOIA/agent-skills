@@ -42,7 +42,7 @@ hands off to the next. All of them share [`gh-workflow-conventions`](skills/gh-w
 | 3b | `gh-verify-review-resolution` | Read-only: classifies whether each comment was addressed; decides if another review round is justified | back to `gh-review-pr` |
 | 4 | `gh-merge-pr` | Merges once green + approved with no unresolved threads; handles issue closure; recommends the next issue | `gh-julia-release` / next issue |
 | post | `gh-julia-release` | Publishes a Julia package version all the way to `Pkg.add` | — |
-| post | `gh-pages-deployment` | Investigates/manages GitHub Pages deployment state | — |
+| post | `gh-pages-deployment` | Investigates/manages GitHub Pages and other hosted documentation deployment state | — |
 
 ## Three meta skills (the pipeline improving itself)
 

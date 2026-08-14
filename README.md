@@ -15,7 +15,7 @@ This repository is the **single source of truth**. It is private and curated by 
 | `gh-verify-review-resolution` | Read-only check of whether review comments were addressed |
 | `gh-merge-pr` | Merge a PR after verifying it is ready |
 | `gh-julia-release` | Publish a Julia package release through the registry |
-| `gh-pages-deployment` | Investigate/manage GitHub Pages deployments |
+| `gh-pages-deployment` | Investigate/manage GitHub Pages and other hosted documentation deployments |
 | `gh-workflow-conventions` | Shared conventions the `gh-*` skills reference (not run directly) |
 | `explain-pr-to-me` | Explain a PR technically and in plain language without posting or changing state |
 | `apply-conversation-lessons` | Fold lessons from a session back into the skills (on your `learnings/<user>` branch) |
