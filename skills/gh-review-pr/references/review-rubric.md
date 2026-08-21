@@ -4,7 +4,7 @@ Read this when judging whether the code a PR introduces or materially changes is
 
 ## Three binding rules
 
-1. **The repo overrides.** A documented repository standard (`CONTRIBUTING`, style guide, linter config, established local pattern) always wins. Where the repo endorses something this rubric would flag, suppress the flag.
+1. **The repo overrides.** A documented repository standard (`CONTRIBUTING`, style guide, linter config, established local pattern) always wins. Where the repo endorses something this rubric would flag, suppress the flag. Infer endorsement from the repo's *trajectory*, not from any single occurrence: one legacy call site is weak evidence against a recent maintainer-driven change that moved sibling code the other way (for example, a just-merged PR making internal keywords required), and suppressing a flag on the strength of the older pattern reproduces exactly what the maintainer is removing.
 2. **Always a judgement call.** Every item below is a labelled heuristic ("possible Feature Envy"), never a hard violation. Map it to `Nonblocking` (or `Question`) severity by default; escalate to `Blocking` only when the smell also causes a correctness, security, or serious maintainability problem covered by the Review Standard.
 3. **Skip what tooling enforces.** If a formatter, linter, or type checker already catches it, do not raise it in the review.
 
