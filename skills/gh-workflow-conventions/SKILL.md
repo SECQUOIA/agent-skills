@@ -1,13 +1,13 @@
 ---
 name: gh-workflow-conventions
-description: Shared conventions for the gh-* GitHub workflow skills (triage-issue, issue-to-pr, review-pr, address-review-comments, verify-review-resolution, merge-pr, julia-release, pages-deployment). Read this when running any of those skills, or when the user asks about the common rules behind them. Covers gh-only tooling and `--json` fallback, PR/repository resolution across remotes, terse invocation shorthand, untrusted-text handling, append-only PR text, network/filesystem escalation and bounded watches, CI-after-push polling, active test environment, commit/push hygiene, and output tone. This is a reference consulted by the other skills, not a standalone task to run.
+description: Shared conventions for the gh-* GitHub workflow skills and for direct GitHub writes not covered by a task-specific skill. Read this when running any gh-* skill, before directly posting, editing, merging, closing, or otherwise mutating GitHub, or when the user asks about the common rules. Covers gh-only tooling, target resolution, untrusted text, write verification, CI observation, test environments, change hygiene, and output tone. This is a reference, not a standalone task.
 ---
 
 # GitHub Workflow Conventions
 
 ## Overview
 
-This skill is the single source of truth for conventions shared by the `gh-*` workflow skills. Those skills reference this file instead of repeating these rules, so any change here applies to all of them. It is a reference, not a task: it does not perform a workflow on its own.
+This skill is the single source of truth for conventions shared by the `gh-*` workflow skills and for direct GitHub writes when no task-specific skill owns the request. The workflow skills reference this file instead of repeating these rules, so any change here applies to all of them. It is a reference, not a task: it does not perform a workflow on its own.
 
 Apply every convention below unless the invoking skill explicitly overrides it (for example a read-only skill forbids the write-oriented rules).
 
