@@ -36,6 +36,13 @@ Part of **gh-workflow-conventions**. Read this before resolving or fetching a Gi
   final filter exits zero, making unavailable content look empty. Do not treat
   zero matches as absence evidence until the `gh` read itself succeeded.
 
+- `gh api` changes its default method from `GET` to `POST` when `-f` or `-F`
+  fields are supplied. For read endpoints with query parameters (for example,
+  `actions/runs` filtered by `head_sha`), pass `-X GET`; otherwise an HTTP 404
+  can mean the request used the wrong method, not that the endpoint or resource
+  is absent. Do not interpret that 404 as state until the explicit-GET retry
+  succeeds.
+
 - When passing GraphQL queries or other file-backed values to `gh api`, always use a typed file field such as `-F query=@<file>`: lowercase `-f` / `--raw-field` sends the literal `@<file>` string, and an inline `-f query='...'` multi-line string is easily mangled by the shell — both fail with parser errors like `Expected NAME, actual: (none)`. Create the query file with the file-write tool rather than a `cat > file <<'EOF'` heredoc, which needlessly routes through shell-command approval; for heredocs passed through `conda run` or `uv run`, follow [test-environment.md](test-environment.md) because those wrappers can silently discard stdin.
 
 - Do not assume `gh api --slurp` exists; older builds reject it. For paginated GraphQL, retry with `--paginate`, inspect `pageInfo`, and use an explicit cursor loop when machine parsing multiple page documents rather than treating the unsupported flag as missing review data. `gh api graphql --paginate` advances the specially named `$endCursor` variable, so declare it and pass it to `after:`; an arbitrary name such as `$cursor` is not populated automatically.
