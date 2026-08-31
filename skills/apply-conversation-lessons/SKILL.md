@@ -19,7 +19,7 @@ Treat shared skills as stable by default. The normal successful result of this w
    - Always infer candidate lessons from the current conversation when this skill is invoked.
    - If the user supplied lessons or requested a specific change, include that input alongside the inferred candidates.
    - Enumerate every skill used in the session, including this skill, and consider whether each has a durable lesson before narrowing to edits.
-   - When `scripts/encounter_ledger.py` is present, run `python <this-skill>/scripts/encounter_ledger.py report` before triage. Its default report requires three independent violation episodes in 30 days and combines Codex and Claude events from the same local ledger.
+   - When `scripts/encounter_ledger.py` is present, run `python -B <this-skill>/scripts/encounter_ledger.py report` before triage. Its default report requires three independent violation episodes in 30 days and combines Codex and Claude events from the same local ledger. The no-bytecode flag keeps this read-only audit from dirtying a managed skills checkout with `__pycache__` files.
    - Ask a follow-up only when a likely edit would be risky or ambiguous. Do not invent user preferences as facts.
 
 2. Triage each lesson.
@@ -52,9 +52,9 @@ Treat shared skills as stable by default. The normal successful result of this w
    - Preserve frontmatter unless the trigger behavior itself changes. Update any sidecar agent metadata that is present (for example `agents/openai.yaml`) only when its user-facing metadata becomes stale.
 
 4. Validate.
-   - Run the skill validator for every changed skill when available. The validator ships with the `skill-creator` system skill, not with the edited skill's own repo: run `python <skill-creator>/scripts/quick_validate.py <skill-folder>` (e.g. `~/.codex/skills/.system/skill-creator/scripts/quick_validate.py` for Codex, or the equivalent under the Claude skills home). A skills repo shipping no validator of its own does NOT mean none is available — locate `skill-creator` before concluding validation is impossible.
+   - Run the skill validator for every changed skill when available. The validator ships with the `skill-creator` system skill, not with the edited skill's own repo: run `python -B <skill-creator>/scripts/quick_validate.py <skill-folder>` (e.g. `python -B ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py <skill-folder>` for Codex, or the equivalent under the Claude skills home). A skills repo shipping no validator of its own does NOT mean none is available — locate `skill-creator` before concluding validation is impossible.
    - Pass the skill folder as an absolute path, or re-anchor to the skills repo root in the same command. The shell's working directory persists from earlier work in other repositories (a lessons pass often interleaves with edits elsewhere, such as a repo-doc PR), and a relative `skills/<name>` path then fails with a misleading `SKILL.md not found` even though the skill is fine.
-   - If the validator script exists but is not executable, retry it with the appropriate interpreter such as `python <validator> <skill-folder>` before treating validation as unavailable.
+   - If the validator script exists but is not executable, retry it with the appropriate interpreter such as `python -B <validator> <skill-folder>` before treating validation as unavailable.
    - The validator imports PyYAML, which a bare system interpreter often lacks; `ModuleNotFoundError: No module named 'yaml'` is a wrong-interpreter result, not a broken validator or an invalid skill. Re-run it under an interpreter that has the dependency — a conda base environment or any project virtualenv on the machine — rather than installing anything or falling back to manual inspection. Probe candidates with a one-line `import yaml` check instead of guessing, since a repo-local virtualenv is frequently the one that does *not* have it.
    - If validation tooling is unavailable, at least inspect frontmatter, required fields, and Markdown structure.
    - Report any skill that could not be edited or validated.

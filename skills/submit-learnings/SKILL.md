@@ -1,6 +1,6 @@
 ---
 name: submit-learnings
-description: "Push a personal learnings branch in a managed shared-skills repo and open a pull request for the single reviewer. Use when the user wants to submit their accumulated skill improvements, do the weekly learnings push, share their learnings branch, or gives a terse invocation like `$submit-learnings`. Rebases the learnings branch on the default branch, pushes it, and opens or updates one PR (title prefixed `learnings:`); it does not review or merge. Complements apply-conversation-lessons, which accumulates the commits."
+description: "Push a personal learnings branch in a managed shared-skills repo and open a pull request for the single reviewer. Use when the user wants to submit their accumulated skill improvements, do the weekly learnings push, share their learnings branch, or gives a terse invocation like `$submit-learnings`. Rebases the learnings branch on the default branch, pushes it, and opens one PR (title prefixed `learnings:`) or adds a new status comment to its existing PR; it does not review or merge. Complements apply-conversation-lessons, which accumulates the commits."
 ---
 
 # Submit Learnings
@@ -31,12 +31,12 @@ Follow the shared **gh-workflow-conventions** (read the sibling `gh-workflow-con
 2. Push the branch.
    - Push with tracking (`git push -u origin <branch>`); use `--force-with-lease` only when the push is rejected solely because of the rebase you just performed, never a plain `--force`.
 
-3. Open or update the pull request.
+3. Open or continue the pull request.
    - Check for an existing open PR for this head branch (`gh pr list --head <branch> --state open --json number,url`).
    - If none exists, create one against the default branch: `gh pr create --base <default> --head <branch> --title "learnings: <short summary>" --body-file <body_file>`.
-   - If one exists, the push already updated it; refresh the body with `gh pr edit --body-file <body_file>` only if it is stale. Do not open a duplicate.
-   - Build the title and body from the commits since the default branch (`git log origin/<default>..HEAD --oneline` and the diff `--stat`). The body should list, per skill touched, what changed and why, so the reviewer can assess each learning independently. Write it to a body file and pass it with `--body-file`.
-   - When the branch restructures a shared skill — splitting sections into `references/` files, renaming or moving files other contributors also edit — call that out in its own labeled paragraph at the top of the body. Sibling contributors' in-flight learnings branches still editing the old layout will conflict on rebase, so the reviewer should know to prioritize landing the restructure and to prompt other contributors to sync; state which files moved where so their conflict resolution is mechanical.
+   - If one exists, the push already updated it. Do not edit its title, body, or prior comments unless the user explicitly requested that exact edit. Instead, record `HEAD_SHA="$(git rev-parse HEAD)"` and post a new top-level status comment containing the current summary and `<!-- submit-learnings:head=<HEAD_SHA> -->`; skip it when that exact marker already exists. Do not open a duplicate.
+   - Build the title and summary from the commits since the default branch (`git log origin/<default>..HEAD --oneline` and the diff `--stat`). The summary should list, per skill touched, what changed and why, so the reviewer can assess each learning independently. For a new PR, write it to a body file and pass it with `--body-file`; for an existing PR, use it as the new status-comment body.
+   - When the branch restructures a shared skill — splitting sections into `references/` files, renaming or moving files other contributors also edit — call that out in its own labeled paragraph at the top of the initial body or new status comment. Sibling contributors' in-flight learnings branches still editing the old layout will conflict on rebase, so the reviewer should know to prioritize landing the restructure and to prompt other contributors to sync; state which files moved where so their conflict resolution is mechanical.
 
 4. Report and hand off.
    - Do not review or merge. Report the PR URL, the branch, the skills touched, and the commit summaries.
@@ -44,4 +44,4 @@ Follow the shared **gh-workflow-conventions** (read the sibling `gh-workflow-con
 
 ## Final Response
 
-Return the PR URL, branch name, the list of skills changed with a one-line summary each, whether the PR was created or updated, and any rebase conflict that blocked submission. Keep it concise and professional; no emoji or praise padding.
+Return the PR URL, branch name, the list of skills changed with a one-line summary each, whether the PR was created, received a new status comment, or was already current, and any rebase conflict that blocked submission. Keep it concise and professional; no emoji or praise padding.
