@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -670,6 +670,38 @@ def _repo_from_cwd(cwd: str | None) -> str:
         return _normalize_repo(result.stdout)
     except (OSError, subprocess.SubprocessError):
         return "unknown-repo"
+
+
+_CD_OPTION_TOKENS = frozenset({"-L", "-P", "-e", "-@"})
+
+
+def _cd_segment_directory(
+    segment: list[str], current: str | None
+) -> tuple[bool, str | None]:
+    """Interpret a shell segment as a ``cd`` builtin invocation.
+
+    Returns ``(is_cd, new_directory)``. ``new_directory`` is ``None`` when the
+    destination cannot be resolved statically: a dynamic value, ``cd -``, no
+    argument, extra arguments, or a relative path from an unknown directory."""
+    if not segment or segment[0] != "cd":
+        return False, None
+    args = list(segment[1:])
+    while args and args[0] in _CD_OPTION_TOKENS:
+        args.pop(0)
+    if args and args[0] == "--":
+        args.pop(0)
+    if len(args) != 1:
+        return True, None
+    target = args[0]
+    if target == "-" or _dynamic_shell_value(target):
+        return True, None
+    if target.startswith("~"):
+        target = os.path.expanduser(target)
+    if os.path.isabs(target):
+        return True, os.path.normpath(target)
+    if current is None:
+        return True, None
+    return True, os.path.normpath(os.path.join(current, target))
 
 
 def _tokenize_shell(command: str) -> list[str]:
@@ -1840,6 +1872,7 @@ def _segments_containing_gh(
     initial: _ExecutionContext | None = None,
 ) -> Iterable[tuple[list[str], bool, _ExecutionContext]]:
     initial = initial or _ExecutionContext(environment={})
+    current = initial
     tokens = _tokenize_shell(command)
     if depth < MAX_NESTED_SHELL_DEPTH:
         for substitution in _command_substitutions(command):
@@ -1881,7 +1914,7 @@ def _segments_containing_gh(
                 for env_index, part in enumerate(segment):
                     if Path(part).name != "env":
                         continue
-                    prefix_context = _inline_environment(segment[:env_index], initial)
+                    prefix_context = _inline_environment(segment[:env_index], current)
                     if prefix_context is None:
                         continue
                     env_consumption = _consume_env_wrapper(segment[env_index:])
@@ -1919,7 +1952,7 @@ def _segments_containing_gh(
             for gh_index, part in enumerate(segment):
                 if not _gh_token(part):
                     continue
-                context = _inline_environment(segment[:gh_index], initial)
+                context = _inline_environment(segment[:gh_index], current)
                 if context is not None:
                     candidates.append((gh_index, context))
             if candidates:
@@ -1953,6 +1986,25 @@ def _segments_containing_gh(
                     and context.read_success_coupled
                 )
                 yield normalized, read_eligible, context
+            # A `cd` segment changes the directory the following segments run
+            # in, but only when its terminator guarantees it took effect: after
+            # `||` the next command runs precisely because the cd failed, and a
+            # pipe confines the cd to its own subshell.
+            if set(token) <= {";", "\n"} or token == "&&":
+                is_cd, cd_directory = _cd_segment_directory(
+                    segment, current.working_directory
+                )
+                if is_cd:
+                    if cd_directory is None:
+                        current = replace(
+                            current,
+                            repository_scope_changed=True,
+                            working_directory=None,
+                        )
+                    else:
+                        current = replace(
+                            current, working_directory=cd_directory
+                        )
             segment = []
         else:
             segment.append(token)

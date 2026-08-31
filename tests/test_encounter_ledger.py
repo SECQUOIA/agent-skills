@@ -573,6 +573,42 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertEqual(preserved_by_sudo.workflow_label, "owner/repo#11")
         self.assertTrue(preserved_by_sudo.read_eligible)
 
+    def test_cd_segments_update_the_repository_scope(self):
+        def repo_for(cwd):
+            return {
+                "/source": "source/repo",
+                "/other": "other/repo",
+                "/source/sub": "sub/repo",
+            }.get(cwd, "unknown-repo")
+
+        with mock.patch.object(ledger, "_repo_from_cwd", side_effect=repo_for):
+            re_anchored = ledger.classify_gh_operations(
+                "cd /other && gh pr comment 11 --body done", "/source"
+            )[0]
+            relative = ledger.classify_gh_operations(
+                "cd sub; gh pr comment 11 --body done", "/source"
+            )[0]
+            failed_guard = ledger.classify_gh_operations(
+                "cd /other || gh pr comment 11 --body done", "/source"
+            )[0]
+            piped = ledger.classify_gh_operations(
+                "cd /other | gh pr comment 11 --body done", "/source"
+            )[0]
+            dynamic_target = ledger.classify_gh_operations(
+                'cd "$DIR" && gh pr comment 11 --body done', "/source"
+            )[0]
+            explicit_repo_wins = ledger.classify_gh_operations(
+                "cd /other && gh pr comment 11 --repo named/repo --body done",
+                "/source",
+            )[0]
+
+        self.assertEqual(re_anchored.workflow_label, "other/repo#11")
+        self.assertEqual(relative.workflow_label, "sub/repo#11")
+        self.assertEqual(failed_guard.workflow_label, "source/repo#11")
+        self.assertEqual(piped.workflow_label, "source/repo#11")
+        self.assertIn("dynamic", dynamic_target.workflow_key)
+        self.assertEqual(explicit_repo_wins.workflow_label, "named/repo#11")
+
         unset_host = ledger.classify_gh_operations(
             "GH_HOST=git.example env --unset=GH_HOST "
             "gh pr view 11 --repo owner/repo --json state",
