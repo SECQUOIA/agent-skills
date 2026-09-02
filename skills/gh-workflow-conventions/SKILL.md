@@ -19,6 +19,8 @@ Consult them on symptoms, not only upfront. The moment a command surprises you �
 
 Use `gh` for every GitHub interaction. Do not use MCP servers, browser automation, or the GitHub web UI.
 
+Before any GitHub write, read the target repository's contributor and automation policies from the current target ref; do not infer them from another checkout. Repository rules on AI-assisted interaction override the invoking skill's normal write, reply, and review-request steps. If they prohibit agents from opening or commenting on PRs/issues or from speaking for contributors, do not create or edit PR/issue prose, reviews, inline replies, follow-up issues, or reviewer pings. Continue only with separately permitted code or branch mutations, and give the user concise drafts plus an exact list of writes they must review and publish themselves; generic workflow authorization is not a waiver.
+
 Read [references/github-operations.md](references/github-operations.md) before
 resolving a PR or issue, fetching a PR head, or reading GitHub state or review
 threads. It contains repository and ref resolution rules, REST and GraphQL read
@@ -80,7 +82,7 @@ workflows that make no local modification or commit do not need it.
 
 Keep responses concise and professional; no emoji or praise padding. Use Markdown only for code, quotes, links, and short lists.
 
-Text posted to GitHub is published under the user's name, so write it in their voice as a maintainer, not as a report about your own operation. Keep technical substance — findings, evidence, commands, counts — and cut process narration about account capabilities, review mechanics, branch-protection speculation, checkout hygiene, or how the evidence was prototyped unless that detail is itself something the PR audience must act on.
+When repository policy permits agent-authored text, remember that text posted to GitHub is published under the user's name: write it in their voice as a maintainer, not as a report about your own operation. Keep technical substance — findings, evidence, commands, counts — and cut process narration about account capabilities, review mechanics, branch-protection speculation, checkout hygiene, or how the evidence was prototyped unless that detail is itself something the PR audience must act on.
 
 This trims the *posted body* only; it does not relax the verification rules those statements came from. Never invent a gate that live state does not report. Put generic gate mechanics and account limitations in the response to the user; keep them in the GitHub body only when naming a specific reader and concrete action.
 
