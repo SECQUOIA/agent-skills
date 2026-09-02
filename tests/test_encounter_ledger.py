@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import argparse
+import contextlib
 import importlib.util
+import io
 import json
+import os
 import shlex
 import sqlite3
 import sys
@@ -224,6 +228,98 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["violations"], 3)
         self.assertEqual(rows[0]["agents"], ["claude", "codex"])
+
+    @unittest.skipIf(
+        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        "non-root POSIX permissions are required",
+    )
+    def test_report_command_reads_a_nonwritable_existing_ledger(self):
+        now = datetime.now(timezone.utc)
+        connection = self.connection()
+        try:
+            for offset in (50, 25, 0):
+                ledger.record_encounter(
+                    connection,
+                    rule_id="GH-WRITE-READBACK-001",
+                    workflow_id="github:o/r:number:11",
+                    workflow_label="o/r#11",
+                    agent="codex",
+                    outcome="escaped",
+                    revision="aaa",
+                    now=now - timedelta(hours=offset),
+                )
+        finally:
+            connection.close()
+
+        state_dir = Path(self.state_dir)
+        database = state_dir / "encounters.sqlite3"
+        try:
+            database.chmod(0o400)
+            state_dir.chmod(0o500)
+            output = io.StringIO()
+            args = argparse.Namespace(
+                state_dir=self.state_dir,
+                since_days=30,
+                min_encounters=3,
+                json=True,
+            )
+            with contextlib.redirect_stdout(output):
+                result = ledger._command_report(args)
+        finally:
+            state_dir.chmod(0o700)
+            database.chmod(0o600)
+
+        self.assertEqual(result, 0)
+        rows = json.loads(output.getvalue())
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["violations"], 3)
+
+    def test_report_command_does_not_create_a_missing_state_directory(self):
+        state_dir = Path(self.state_dir) / "missing"
+        output = io.StringIO()
+        args = argparse.Namespace(
+            state_dir=str(state_dir),
+            since_days=30,
+            min_encounters=3,
+            json=True,
+        )
+
+        with contextlib.redirect_stdout(output):
+            result = ledger._command_report(args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(output.getvalue()), [])
+        self.assertFalse(state_dir.exists())
+
+    def test_report_command_reads_committed_rows_from_an_active_wal(self):
+        writer = self.connection()
+        try:
+            ledger.record_encounter(
+                writer,
+                rule_id="GH-WRITE-READBACK-001",
+                workflow_id="github:o/r:number:11",
+                workflow_label="o/r#11",
+                agent="codex",
+                outcome="escaped",
+                revision="aaa",
+            )
+            args = argparse.Namespace(
+                state_dir=self.state_dir,
+                since_days=30,
+                min_encounters=1,
+                json=True,
+            )
+            output = io.StringIO()
+
+            with contextlib.redirect_stdout(output):
+                result = ledger._command_report(args)
+        finally:
+            writer.close()
+
+        self.assertEqual(result, 0)
+        rows = json.loads(output.getvalue())
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["violations"], 1)
 
     def test_classifies_separate_and_compound_gh_operations(self):
         command = (

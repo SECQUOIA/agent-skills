@@ -456,6 +456,73 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
 
 
 @contextmanager
+def report_database(
+    explicit_state_dir: str | None = None,
+) -> Iterator[sqlite3.Connection | None]:
+    """Open a current ledger view without writing to its state directory."""
+    database = state_directory(explicit_state_dir) / "encounters.sqlite3"
+    if not database.is_file():
+        yield None
+        return
+
+    sidecars = tuple(
+        database.with_name(f"{database.name}{suffix}") for suffix in ("-wal", "-shm")
+    )
+    with tempfile.TemporaryDirectory(prefix="secquoia-ledger-report-") as temporary:
+        snapshot = Path(temporary) / database.name
+        for _ in range(3):
+            sidecar_state = tuple(path.exists() for path in sidecars)
+            if all(sidecar_state):
+                uri = f"{database.resolve().as_uri()}?mode=ro"
+                connection = None
+                try:
+                    connection = sqlite3.connect(uri, uri=True, timeout=2)
+                    connection.row_factory = sqlite3.Row
+                    connection.execute("PRAGMA query_only=ON")
+                    connection.execute("SELECT 1 FROM sqlite_schema LIMIT 1").fetchone()
+                except sqlite3.OperationalError:
+                    if connection is not None:
+                        connection.close()
+                    continue
+                try:
+                    yield connection
+                finally:
+                    connection.close()
+                return
+            if any(sidecar_state):
+                continue
+            before = database.stat()
+            shutil.copyfile(database, snapshot)
+            after = database.stat()
+            stable = (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+            ) == (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+            )
+            if not stable or any(path.exists() for path in sidecars):
+                continue
+
+            connection = sqlite3.connect(snapshot, timeout=2)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA query_only=ON")
+            try:
+                yield connection
+            finally:
+                connection.close()
+            return
+
+    raise sqlite3.OperationalError(
+        "encounter ledger changed while opening; rerun the report"
+    )
+
+
+@contextmanager
 def _write_transaction(connection: sqlite3.Connection) -> Iterator[None]:
     """Serialize a logical state transition while allowing nested helpers."""
     outer_transaction = connection.in_transaction
@@ -3845,15 +3912,15 @@ def _command_record(args: argparse.Namespace) -> int:
 
 
 def _command_report(args: argparse.Namespace) -> int:
-    connection = connect_database(args.state_dir)
-    try:
-        rows = report_encounters(
-            connection,
-            since_days=args.since_days,
-            min_encounters=args.min_encounters,
-        )
-    finally:
-        connection.close()
+    with report_database(args.state_dir) as connection:
+        if connection is None:
+            rows = []
+        else:
+            rows = report_encounters(
+                connection,
+                since_days=args.since_days,
+                min_encounters=args.min_encounters,
+            )
     if args.json:
         print(json.dumps(rows, indent=2))
         return 0
