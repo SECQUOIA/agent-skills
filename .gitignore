@@ -3,3 +3,6 @@
 
 # User-specific skills that must remain local and unpublished
 /skills-local/
+
+# Python bytecode from ledger/test runs (pytest writes it regardless of -B)
+__pycache__/
