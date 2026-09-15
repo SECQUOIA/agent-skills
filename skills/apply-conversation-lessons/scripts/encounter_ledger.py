@@ -2631,6 +2631,10 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
             continue
         if group == "api":
             kind = _api_kind(tokens, operation_cwd)
+        elif group == "repo" and action == "set-default" and "--view" in tokens[3:]:
+            # `gh repo set-default --view` only prints the pinned repository;
+            # the shared conventions prescribe it as a read-only probe.
+            kind = "read"
         elif action in WRITE_ACTIONS.get(group, set()):
             kind = "write"
         elif action in READ_ACTIONS.get(group, set()):

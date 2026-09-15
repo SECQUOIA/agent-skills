@@ -334,6 +334,12 @@ class EncounterLedgerTests(unittest.TestCase):
             {operation.workflow_label for operation in operations}, {"owner/repo#11"}
         )
 
+    def test_repo_set_default_view_is_a_read_and_pinning_is_a_write(self):
+        view = ledger.classify_gh_operations("gh repo set-default --view", "/tmp")
+        pin = ledger.classify_gh_operations("gh repo set-default owner/repo", "/tmp")
+        self.assertEqual([operation.kind for operation in view], ["read"])
+        self.assertEqual([operation.kind for operation in pin], ["write"])
+
         api = ledger.classify_gh_operations(
             "gh api --method POST repos/owner/repo/pulls/11/reviews --input /tmp/review.json",
             "/tmp",
