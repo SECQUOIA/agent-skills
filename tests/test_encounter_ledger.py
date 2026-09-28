@@ -1966,6 +1966,120 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertEqual(outcomes["GH-LIVE-STATE-001"], "passed")
         self.assertEqual(outcomes["GH-WRITE-READBACK-001"], "passed")
 
+    def _run_codex(self, event, command="", response=None):
+        return ledger.run_hook(
+            hook_payload(event, command, response),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+
+    def _readback_outcome(self, label):
+        connection = self.connection()
+        try:
+            row = connection.execute(
+                """
+                SELECT outcome FROM encounters
+                WHERE rule_id = 'GH-WRITE-READBACK-001' AND workflow_label = ?
+                """,
+                (label,),
+            ).fetchone()
+        finally:
+            connection.close()
+        return row["outcome"] if row else None
+
+    def test_created_comment_id_credits_its_prescribed_readback(self):
+        # The conventions prescribe re-reading a new discussion comment through
+        # issues/comments/{id} and a new review reply through pulls/comments/{id};
+        # neither carries the PR number, so the id must come from the write.
+        cases = (
+            (
+                "gh api repos/owner/repo/issues/11/comments --method POST"
+                " -F body=@summary.md --jq '{id,url:.html_url}'",
+                '{"id":555,"url":"https://github.com/owner/repo/pull/11'
+                '#issuecomment-555"}\n',
+                "gh api repos/owner/repo/issues/comments/555 --jq .id",
+            ),
+            (
+                "gh api repos/owner/repo/pulls/11/comments/77/replies --method POST"
+                " -F body=@reply.md",
+                '{"id":888,"node_id":"PRRC_x","html_url":"https://github.com/owner/'
+                'repo/pull/11#discussion_r888","user":{"login":"me","id":1}}\n',
+                "gh api repos/owner/repo/pulls/comments/888 --jq .body",
+            ),
+            (
+                "gh pr comment 11 --repo owner/repo --body done",
+                "https://github.com/owner/repo/pull/11#issuecomment-556\n",
+                "gh api repos/owner/repo/issues/comments/556",
+            ),
+            (
+                "gh api repos/owner/repo/issues/11/comments --method POST"
+                " -F body=@summary.md --jq .id",
+                "557\n",
+                "gh api repos/owner/repo/issues/comments/557 --jq .id",
+            ),
+        )
+        for write, stdout, readback in cases:
+            with self.subTest(write=write):
+                self.setUp()
+                self._run_codex(
+                    "PostToolUse",
+                    "gh pr view 11 --repo owner/repo --json state",
+                    {"exit_code": 0},
+                )
+                self.assertIsNone(self._run_codex("PreToolUse", write))
+                self._run_codex(
+                    "PostToolUse", write, {"exit_code": 0, "stdout": stdout}
+                )
+                self._run_codex("PostToolUse", readback, {"exit_code": 0})
+                self.assertEqual(self._run_codex("Stop"), {})
+                self.assertEqual(self._readback_outcome("owner/repo#11"), "passed")
+                self.tearDown()
+        self.setUp()
+
+    def test_reading_a_different_comment_id_is_not_a_readback(self):
+        write = (
+            "gh api repos/owner/repo/issues/11/comments --method POST"
+            " -F body=@summary.md"
+        )
+        self._run_codex(
+            "PostToolUse",
+            "gh pr view 11 --repo owner/repo --json state",
+            {"exit_code": 0},
+        )
+        self.assertIsNone(self._run_codex("PreToolUse", write))
+        self._run_codex(
+            "PostToolUse",
+            write,
+            {
+                "exit_code": 0,
+                "stdout": '{"id":555,"html_url":"https://github.com/owner/repo/'
+                'pull/11#issuecomment-555"}\n',
+            },
+        )
+        self._run_codex(
+            "PostToolUse",
+            "gh api repos/owner/repo/issues/comments/556 --jq .id",
+            {"exit_code": 0},
+        )
+        self.assertIn("systemMessage", self._run_codex("Stop"))
+        self.assertEqual(self._readback_outcome("owner/repo#11"), "escaped")
+
+    def test_comment_by_id_endpoints_share_one_key_for_read_and_write(self):
+        read = "gh api repos/owner/repo/pulls/comments/888 --jq .body"
+        write = "gh api repos/owner/repo/pulls/comments/888 --method PATCH -f body=fixed"
+        read_op = ledger.classify_gh_operations(read, "/tmp")[0]
+        write_op = ledger.classify_gh_operations(write, "/tmp")[0]
+        self.assertEqual(read_op.kind, "read")
+        self.assertEqual(write_op.kind, "write")
+        self.assertEqual(read_op.workflow_key, write_op.workflow_key)
+        self.assertEqual(write_op.workflow_label, "owner/repo:pulls/comments/888")
+        self.assertEqual(write_op.created_comment_kind, "")
+        issue_read = ledger.classify_gh_operations(
+            "gh api repos/owner/repo/issues/comments/888", "/tmp"
+        )[0]
+        self.assertNotEqual(issue_read.workflow_key, read_op.workflow_key)
+
     def test_failed_read_does_not_satisfy_preflight(self):
         read = "gh pr view 11 --repo owner/repo --json state"
         write = "gh pr comment 11 --repo owner/repo --body done"
