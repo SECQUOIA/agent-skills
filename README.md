@@ -12,7 +12,7 @@ This repository is the **single source of truth**. It is private and curated by 
 | `gh-issue-to-pr` | Turn a GitHub issue into a focused implementation PR |
 | `gh-review-pr` | Post a maintainer review verdict on a PR (uses `references/review-rubric.md`) |
 | `gh-address-review-comments` | Implement fixes for review feedback and reply in-thread |
-| `gh-verify-review-resolution` | Read-only check of whether review comments were addressed |
+| `gh-verify-review-resolution` | Check whether review comments were addressed (read-only unless asked to post the outcome review) |
 | `gh-merge-pr` | Merge a PR after verifying it is ready |
 | `gh-julia-release` | Publish a Julia package release through the registry |
 | `gh-pages-deployment` | Investigate/manage GitHub Pages and other hosted documentation deployments |

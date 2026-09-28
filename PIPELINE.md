@@ -39,7 +39,7 @@ hands off to the next. All of them share [`gh-workflow-conventions`](skills/gh-w
 | 1 | `gh-issue-to-pr` | Turns an issue into a focused draft PR: plans (and challenges the approach), implements the smallest correct change, adds tests, self-reviews against the code-smell rubric, opens the PR, watches CI | `gh-review-pr` |
 | 2 | `gh-review-pr` | Posts one maintainer review verdict with severity-tagged findings; checks linked-issue intent and merge-readiness | address (if changes) or merge (if approved) |
 | 3a | `gh-address-review-comments` | Implements the smallest correct fixes for review feedback, replies in each thread | `gh-verify-review-resolution` |
-| 3b | `gh-verify-review-resolution` | Read-only: classifies whether each comment was addressed; decides if another review round is justified | back to `gh-review-pr` |
+| 3b | `gh-verify-review-resolution` | Read-only by default: classifies whether each comment was addressed; decides if another review round is justified; on explicit request posts the outcome as one APPROVE/COMMENT review | back to `gh-review-pr` |
 | 4 | `gh-merge-pr` | Merges once green + approved with no unresolved threads; handles issue closure; recommends the next issue | `gh-julia-release` / next issue |
 | post | `gh-julia-release` | Publishes a Julia package version all the way to `Pkg.add` | — |
 | post | `gh-pages-deployment` | Investigates/manages GitHub Pages and other hosted documentation deployment state | — |
