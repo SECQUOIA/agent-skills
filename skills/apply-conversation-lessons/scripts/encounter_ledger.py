@@ -2763,6 +2763,48 @@ def _created_target_from_response(
     )
 
 
+_NUMBERED_TARGET_KEY = re.compile(
+    r"^(?P<prefix>.*):(?P<kind>pull|issue|issue-or-pull):number:(?P<number>\d+)$"
+)
+
+
+def _equivalent_workflow_keys(workflow_key: str) -> tuple[str, ...]:
+    """Keys whose read satisfies a live-state or readback check for this key.
+
+    The REST ``issues/{n}`` family cannot tell whether #n is an issue or a
+    pull request, so it is keyed ``issue-or-pull``. A GitHub number belongs to
+    exactly one of the two, so a read of either concrete kind proves the state
+    of an ``issue-or-pull`` write, and a read through the ambiguous family
+    proves either concrete kind. ``pull`` and ``issue`` stay distinct from each
+    other; the shared conventions prescribe ``issues/{n}/comments`` for PR
+    discussion comments, and without this equivalence no prescribed read could
+    ever credit that write.
+    """
+    match = _NUMBERED_TARGET_KEY.match(workflow_key)
+    if match is None:
+        return (workflow_key,)
+    prefix, kind, number = match.group("prefix", "kind", "number")
+    kinds = (
+        ("issue-or-pull", "pull", "issue")
+        if kind == "issue-or-pull"
+        else (kind, "issue-or-pull")
+    )
+    return tuple(f"{prefix}:{item}:number:{number}" for item in kinds)
+
+
+def _preflight_seen(
+    connection: sqlite3.Connection,
+    session_id: str,
+    turn_id: str,
+    workflow_key: str,
+) -> bool:
+    for key in _equivalent_workflow_keys(workflow_key):
+        row = _activity(connection, session_id, turn_id, key)
+        if row is not None and row["preflight_seen"]:
+            return True
+    return False
+
+
 def _activity(
     connection: sqlite3.Connection,
     session_id: str,
@@ -3197,10 +3239,7 @@ def _pre_tool_use(
         violations = [
             op
             for op in writes
-            if not (
-                _activity(connection, session_id, turn_id, op.workflow_key)
-                or {"preflight_seen": 0}
-            )["preflight_seen"]
+            if not _preflight_seen(connection, session_id, turn_id, op.workflow_key)
         ]
         denied = mode == "enforce" and bool(violations)
         outcome = "prevented" if denied else "escaped"
@@ -3386,7 +3425,8 @@ def _post_tool_use(
                 (
                     read
                     for read in reads
-                    if read.workflow_key == pending["workflow_key"]
+                    if read.workflow_key
+                    in _equivalent_workflow_keys(str(pending["workflow_key"]))
                 ),
                 None,
             )
