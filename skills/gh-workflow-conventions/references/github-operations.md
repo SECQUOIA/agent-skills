@@ -7,15 +7,18 @@ Part of **gh-workflow-conventions**. Read this before resolving or fetching a Gi
   access token: do not request or print the full field merely to identify the
   integration. Project only non-sensitive fields (`id`, `active`, `name`, and
   `events`), or emit a locally extracted hostname with the path and query
-  removed. If a credential-bearing URL is accidentally emitted, do not repeat
-  it; tell the user and recommend rotating or recreating the integration before
-  relying on it. Apply that same response to any credential emitted without
-  your having pasted it: reading a live value back out of the software under
-  test is the usual route, since a getter can return an ambient `*_TOKEN` the
-  environment supplied rather than one the caller set. Before posting a body
-  that quotes command output, scan the assembled payload for the environment's
-  secret values instead of trusting the transcript, and re-scan the object
-  after the write.
+  removed. For process liveness or resource checks, select only needed metadata
+  (e.g. `ps -p <pid> -o pid,ppid,etime,pcpu,stat,comm`) and scope to known task
+  PIDs when available. Avoid full argument or environment dumps (`ps ... args`,
+  `ps auxww`, `pgrep -af`): unrelated IDE or service processes can carry
+  credentials in their command lines. If a credential is accidentally emitted,
+  do not repeat it; tell the user and recommend rotating it or recreating the
+  affected integration before relying on it. Apply that same response to live
+  values read back from the software under test: a getter can return an ambient
+  `*_TOKEN` the environment supplied rather than one the caller set. Before
+  posting a body that quotes command output, scan the assembled payload for the
+  environment's secret values instead of trusting the transcript, and re-scan
+  the object after the write.
 
 - If `gh` is not on `PATH` and the shell reports `gh: command not found`, do not conclude `gh` is unavailable under WSL/Linux: check `PATH` (or `/mnt/c/Program Files/GitHub CLI/gh.exe`) for a Windows `gh.exe` and use it. Quote the full path because it contains a space, and set it once per command (shell variables do not persist across separate tool calls). Confirm it is authenticated with `gh auth status` before relying on it.
 
