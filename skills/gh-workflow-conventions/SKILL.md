@@ -72,8 +72,8 @@ Before running or judging local verification, read the matching reference file; 
 
 ## Local Change, Commit, And Push Hygiene
 
-Before modifying source, creating a commit, pushing a branch, editing generated
-or opaque artifacts, or handling credentials in repository output, read
+Before modifying source, committing, pushing or cleaning up branches, editing
+generated or opaque artifacts, or handling credentials in repository output, read
 [references/change-hygiene.md](references/change-hygiene.md). Read it only for
 workflows that enter those paths; read-only GitHub inspection and review-only
 workflows that make no local modification or commit do not need it.
