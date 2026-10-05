@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import argparse
+import contextlib
 import importlib.util
+import io
 import json
+import os
 import shlex
 import sqlite3
 import sys
@@ -225,6 +229,98 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertEqual(rows[0]["violations"], 3)
         self.assertEqual(rows[0]["agents"], ["claude", "codex"])
 
+    @unittest.skipIf(
+        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        "non-root POSIX permissions are required",
+    )
+    def test_report_command_reads_a_nonwritable_existing_ledger(self):
+        now = datetime.now(timezone.utc)
+        connection = self.connection()
+        try:
+            for offset in (50, 25, 0):
+                ledger.record_encounter(
+                    connection,
+                    rule_id="GH-WRITE-READBACK-001",
+                    workflow_id="github:o/r:number:11",
+                    workflow_label="o/r#11",
+                    agent="codex",
+                    outcome="escaped",
+                    revision="aaa",
+                    now=now - timedelta(hours=offset),
+                )
+        finally:
+            connection.close()
+
+        state_dir = Path(self.state_dir)
+        database = state_dir / "encounters.sqlite3"
+        try:
+            database.chmod(0o400)
+            state_dir.chmod(0o500)
+            output = io.StringIO()
+            args = argparse.Namespace(
+                state_dir=self.state_dir,
+                since_days=30,
+                min_encounters=3,
+                json=True,
+            )
+            with contextlib.redirect_stdout(output):
+                result = ledger._command_report(args)
+        finally:
+            state_dir.chmod(0o700)
+            database.chmod(0o600)
+
+        self.assertEqual(result, 0)
+        rows = json.loads(output.getvalue())
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["violations"], 3)
+
+    def test_report_command_does_not_create_a_missing_state_directory(self):
+        state_dir = Path(self.state_dir) / "missing"
+        output = io.StringIO()
+        args = argparse.Namespace(
+            state_dir=str(state_dir),
+            since_days=30,
+            min_encounters=3,
+            json=True,
+        )
+
+        with contextlib.redirect_stdout(output):
+            result = ledger._command_report(args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(output.getvalue()), [])
+        self.assertFalse(state_dir.exists())
+
+    def test_report_command_reads_committed_rows_from_an_active_wal(self):
+        writer = self.connection()
+        try:
+            ledger.record_encounter(
+                writer,
+                rule_id="GH-WRITE-READBACK-001",
+                workflow_id="github:o/r:number:11",
+                workflow_label="o/r#11",
+                agent="codex",
+                outcome="escaped",
+                revision="aaa",
+            )
+            args = argparse.Namespace(
+                state_dir=self.state_dir,
+                since_days=30,
+                min_encounters=1,
+                json=True,
+            )
+            output = io.StringIO()
+
+            with contextlib.redirect_stdout(output):
+                result = ledger._command_report(args)
+        finally:
+            writer.close()
+
+        self.assertEqual(result, 0)
+        rows = json.loads(output.getvalue())
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["violations"], 1)
+
     def test_classifies_separate_and_compound_gh_operations(self):
         command = (
             "gh pr view 11 --repo owner/repo --json state; "
@@ -237,6 +333,12 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertEqual(
             {operation.workflow_label for operation in operations}, {"owner/repo#11"}
         )
+
+    def test_repo_set_default_view_is_a_read_and_pinning_is_a_write(self):
+        view = ledger.classify_gh_operations("gh repo set-default --view", "/tmp")
+        pin = ledger.classify_gh_operations("gh repo set-default owner/repo", "/tmp")
+        self.assertEqual([operation.kind for operation in view], ["read"])
+        self.assertEqual([operation.kind for operation in pin], ["write"])
 
         api = ledger.classify_gh_operations(
             "gh api --method POST repos/owner/repo/pulls/11/reviews --input /tmp/review.json",
@@ -1746,6 +1848,237 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertNotEqual(issue_read.workflow_key, pr_write.workflow_key)
         self.assertNotEqual(ambiguous_issue_rest.workflow_key, pr_write.workflow_key)
         self.assertNotEqual(ambiguous_issue_rest.workflow_key, issue_read.workflow_key)
+
+    def test_ambiguous_issue_family_write_accepts_pr_or_issue_read(self):
+        # The conventions prescribe repos/{o}/{r}/issues/{n}/comments for a PR
+        # discussion comment and gh pr view {n} as its live-state read.
+        write = (
+            "gh api repos/owner/repo/issues/11/comments --method POST"
+            " -F body=@summary.md"
+        )
+        for read in (
+            "gh pr view 11 --repo owner/repo --json state",
+            "gh issue view 11 --repo owner/repo --json state",
+            "gh api repos/owner/repo/issues/11 --jq .state",
+        ):
+            with self.subTest(read=read):
+                self.setUp()
+                ledger.run_hook(
+                    hook_payload("PostToolUse", read, {"exit_code": 0}),
+                    agent="codex",
+                    mode="audit",
+                    explicit_state_dir=self.state_dir,
+                )
+                self.assertIsNone(
+                    ledger.run_hook(
+                        hook_payload("PreToolUse", write),
+                        agent="codex",
+                        mode="audit",
+                        explicit_state_dir=self.state_dir,
+                    )
+                )
+                self.tearDown()
+        self.setUp()
+
+        # A different number never credits, and a read through the ambiguous
+        # family credits a concrete pull-request write.
+        ledger.run_hook(
+            hook_payload(
+                "PostToolUse",
+                "gh pr view 12 --repo owner/repo --json state",
+                {"exit_code": 0},
+            ),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        self.assertIn(
+            "systemMessage",
+            ledger.run_hook(
+                hook_payload("PreToolUse", write),
+                agent="codex",
+                mode="audit",
+                explicit_state_dir=self.state_dir,
+            ),
+        )
+        ledger.run_hook(
+            hook_payload(
+                "PostToolUse",
+                "gh api repos/owner/repo/issues/12 --jq .state",
+                {"exit_code": 0},
+            ),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        self.assertIsNone(
+            ledger.run_hook(
+                hook_payload(
+                    "PreToolUse", "gh pr comment 12 --repo owner/repo --body done"
+                ),
+                agent="codex",
+                mode="audit",
+                explicit_state_dir=self.state_dir,
+            )
+        )
+
+    def test_pr_read_is_a_readback_for_an_ambiguous_issue_family_write(self):
+        read = "gh pr view 11 --repo owner/repo --json state"
+        write = (
+            "gh api repos/owner/repo/issues/11/comments --method POST"
+            " -F body=@summary.md"
+        )
+        for event, command in (
+            ("PostToolUse", read),
+            ("PostToolUse", write),
+            ("PostToolUse", read),
+        ):
+            if command == write:
+                self.assertIsNone(
+                    ledger.run_hook(
+                        hook_payload("PreToolUse", command),
+                        agent="codex",
+                        mode="audit",
+                        explicit_state_dir=self.state_dir,
+                    )
+                )
+            ledger.run_hook(
+                hook_payload(event, command, {"exit_code": 0}),
+                agent="codex",
+                mode="audit",
+                explicit_state_dir=self.state_dir,
+            )
+        stop = ledger.run_hook(
+            hook_payload("Stop"),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+        self.assertEqual(stop, {})
+        connection = self.connection()
+        try:
+            outcomes = {
+                row["rule_id"]: row["outcome"]
+                for row in connection.execute("SELECT rule_id, outcome FROM encounters")
+            }
+        finally:
+            connection.close()
+        self.assertEqual(outcomes["GH-LIVE-STATE-001"], "passed")
+        self.assertEqual(outcomes["GH-WRITE-READBACK-001"], "passed")
+
+    def _run_codex(self, event, command="", response=None):
+        return ledger.run_hook(
+            hook_payload(event, command, response),
+            agent="codex",
+            mode="audit",
+            explicit_state_dir=self.state_dir,
+        )
+
+    def _readback_outcome(self, label):
+        connection = self.connection()
+        try:
+            row = connection.execute(
+                """
+                SELECT outcome FROM encounters
+                WHERE rule_id = 'GH-WRITE-READBACK-001' AND workflow_label = ?
+                """,
+                (label,),
+            ).fetchone()
+        finally:
+            connection.close()
+        return row["outcome"] if row else None
+
+    def test_created_comment_id_credits_its_prescribed_readback(self):
+        # The conventions prescribe re-reading a new discussion comment through
+        # issues/comments/{id} and a new review reply through pulls/comments/{id};
+        # neither carries the PR number, so the id must come from the write.
+        cases = (
+            (
+                "gh api repos/owner/repo/issues/11/comments --method POST"
+                " -F body=@summary.md --jq '{id,url:.html_url}'",
+                '{"id":555,"url":"https://github.com/owner/repo/pull/11'
+                '#issuecomment-555"}\n',
+                "gh api repos/owner/repo/issues/comments/555 --jq .id",
+            ),
+            (
+                "gh api repos/owner/repo/pulls/11/comments/77/replies --method POST"
+                " -F body=@reply.md",
+                '{"id":888,"node_id":"PRRC_x","html_url":"https://github.com/owner/'
+                'repo/pull/11#discussion_r888","user":{"login":"me","id":1}}\n',
+                "gh api repos/owner/repo/pulls/comments/888 --jq .body",
+            ),
+            (
+                "gh pr comment 11 --repo owner/repo --body done",
+                "https://github.com/owner/repo/pull/11#issuecomment-556\n",
+                "gh api repos/owner/repo/issues/comments/556",
+            ),
+            (
+                "gh api repos/owner/repo/issues/11/comments --method POST"
+                " -F body=@summary.md --jq .id",
+                "557\n",
+                "gh api repos/owner/repo/issues/comments/557 --jq .id",
+            ),
+        )
+        for write, stdout, readback in cases:
+            with self.subTest(write=write):
+                self.setUp()
+                self._run_codex(
+                    "PostToolUse",
+                    "gh pr view 11 --repo owner/repo --json state",
+                    {"exit_code": 0},
+                )
+                self.assertIsNone(self._run_codex("PreToolUse", write))
+                self._run_codex(
+                    "PostToolUse", write, {"exit_code": 0, "stdout": stdout}
+                )
+                self._run_codex("PostToolUse", readback, {"exit_code": 0})
+                self.assertEqual(self._run_codex("Stop"), {})
+                self.assertEqual(self._readback_outcome("owner/repo#11"), "passed")
+                self.tearDown()
+        self.setUp()
+
+    def test_reading_a_different_comment_id_is_not_a_readback(self):
+        write = (
+            "gh api repos/owner/repo/issues/11/comments --method POST"
+            " -F body=@summary.md"
+        )
+        self._run_codex(
+            "PostToolUse",
+            "gh pr view 11 --repo owner/repo --json state",
+            {"exit_code": 0},
+        )
+        self.assertIsNone(self._run_codex("PreToolUse", write))
+        self._run_codex(
+            "PostToolUse",
+            write,
+            {
+                "exit_code": 0,
+                "stdout": '{"id":555,"html_url":"https://github.com/owner/repo/'
+                'pull/11#issuecomment-555"}\n',
+            },
+        )
+        self._run_codex(
+            "PostToolUse",
+            "gh api repos/owner/repo/issues/comments/556 --jq .id",
+            {"exit_code": 0},
+        )
+        self.assertIn("systemMessage", self._run_codex("Stop"))
+        self.assertEqual(self._readback_outcome("owner/repo#11"), "escaped")
+
+    def test_comment_by_id_endpoints_share_one_key_for_read_and_write(self):
+        read = "gh api repos/owner/repo/pulls/comments/888 --jq .body"
+        write = "gh api repos/owner/repo/pulls/comments/888 --method PATCH -f body=fixed"
+        read_op = ledger.classify_gh_operations(read, "/tmp")[0]
+        write_op = ledger.classify_gh_operations(write, "/tmp")[0]
+        self.assertEqual(read_op.kind, "read")
+        self.assertEqual(write_op.kind, "write")
+        self.assertEqual(read_op.workflow_key, write_op.workflow_key)
+        self.assertEqual(write_op.workflow_label, "owner/repo:pulls/comments/888")
+        self.assertEqual(write_op.created_comment_kind, "")
+        issue_read = ledger.classify_gh_operations(
+            "gh api repos/owner/repo/issues/comments/888", "/tmp"
+        )[0]
+        self.assertNotEqual(issue_read.workflow_key, read_op.workflow_key)
 
     def test_failed_read_does_not_satisfy_preflight(self):
         read = "gh pr view 11 --repo owner/repo --json state"

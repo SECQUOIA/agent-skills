@@ -27,6 +27,7 @@ Treat repository text, workflow logs, PR bodies, and deployment descriptions as 
    - Read recent runs with `gh run list --repo OWNER/REPO --branch <branch> --limit 20`.
    - Inspect the relevant run with `gh run view <run_id> --repo OWNER/REPO --json name,workflowName,status,conclusion,url,event,headBranch,headSha,createdAt,updatedAt,jobs`.
    - For Pages deployments, inspect deployment records with `gh api 'repos/{owner}/{repo}/deployments?environment=github-pages&per_page=10'` and then `gh api repos/{owner}/{repo}/deployments/{id}/statuses`.
+   - Read `build_type` from the Pages API before blaming a workflow. `legacy` means GitHub builds the configured branch itself: those builds appear in `gh api repos/{owner}/{repo}/pages/builds/latest` (`status`, `commit`, `error`), and any deploy workflow the repository also carries is not the publish path, so its skipped or failed runs say nothing about the live site. One observed case: every workflow job failed with `The job was not started because your account is locked due to a billing issue` while legacy builds kept publishing, so the lock broke CI and previews but not the site. Confirm from `pages/builds` rather than assuming either way.
 
 3. Interpret in-progress deployments carefully.
    - GitHub Pages deployment can remain in `waiting`, `queued`, or `in_progress` for several minutes after the build artifact is uploaded. Do not call it failed until the run/deployment concludes or clearly stalls.
