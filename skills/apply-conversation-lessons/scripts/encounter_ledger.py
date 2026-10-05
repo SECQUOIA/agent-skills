@@ -229,6 +229,10 @@ class GhOperation:
     repo_key: str
     summary: str
     read_eligible: bool = False
+    # "issue" or "review" when the write creates a comment whose id the
+    # response reveals; the readback rule then also accepts a read of that
+    # comment by id (repos/{o}/{r}/issues/comments/{id} or pulls/comments/{id}).
+    created_comment_kind: str = ""
 
 
 def utc_now() -> datetime:
@@ -400,6 +404,7 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
             pending_write INTEGER NOT NULL DEFAULT 0,
             pending_count INTEGER NOT NULL DEFAULT 0,
             pending_summary TEXT NOT NULL DEFAULT '',
+            readback_keys TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL,
             PRIMARY KEY (session_id, turn_id, workflow_key)
         );
@@ -440,6 +445,11 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
                 "ALTER TABLE hook_activity "
                 "ADD COLUMN pending_count INTEGER NOT NULL DEFAULT 0"
             )
+        if "readback_keys" not in activity_columns:
+            connection.execute(
+                "ALTER TABLE hook_activity "
+                "ADD COLUMN readback_keys TEXT NOT NULL DEFAULT ''"
+            )
     stale_cutoff = isoformat(utc_now() - timedelta(days=HOOK_STATE_RETENTION_DAYS))
     with _write_transaction(connection):
         _migrate_legacy_hook_state(connection)
@@ -453,6 +463,73 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
                 f"DELETE FROM {table} WHERE updated_at < ?", (stale_cutoff,)
             )
     return connection
+
+
+@contextmanager
+def report_database(
+    explicit_state_dir: str | None = None,
+) -> Iterator[sqlite3.Connection | None]:
+    """Open a current ledger view without writing to its state directory."""
+    database = state_directory(explicit_state_dir) / "encounters.sqlite3"
+    if not database.is_file():
+        yield None
+        return
+
+    sidecars = tuple(
+        database.with_name(f"{database.name}{suffix}") for suffix in ("-wal", "-shm")
+    )
+    with tempfile.TemporaryDirectory(prefix="secquoia-ledger-report-") as temporary:
+        snapshot = Path(temporary) / database.name
+        for _ in range(3):
+            sidecar_state = tuple(path.exists() for path in sidecars)
+            if all(sidecar_state):
+                uri = f"{database.resolve().as_uri()}?mode=ro"
+                connection = None
+                try:
+                    connection = sqlite3.connect(uri, uri=True, timeout=2)
+                    connection.row_factory = sqlite3.Row
+                    connection.execute("PRAGMA query_only=ON")
+                    connection.execute("SELECT 1 FROM sqlite_schema LIMIT 1").fetchone()
+                except sqlite3.OperationalError:
+                    if connection is not None:
+                        connection.close()
+                    continue
+                try:
+                    yield connection
+                finally:
+                    connection.close()
+                return
+            if any(sidecar_state):
+                continue
+            before = database.stat()
+            shutil.copyfile(database, snapshot)
+            after = database.stat()
+            stable = (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+            ) == (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+            )
+            if not stable or any(path.exists() for path in sidecars):
+                continue
+
+            connection = sqlite3.connect(snapshot, timeout=2)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA query_only=ON")
+            try:
+                yield connection
+            finally:
+                connection.close()
+            return
+
+    raise sqlite3.OperationalError(
+        "encounter ledger changed while opening; rerun the report"
+    )
 
 
 @contextmanager
@@ -2498,6 +2575,17 @@ def _repo_and_target(tokens: list[str], cwd: str | None) -> tuple[str, str, str]
             repo, resource, number = match.groups()
             object_kind = "pull" if resource == "pulls" else "issue-or-pull"
             return repo, f"{object_kind}:number:{number}", f"{repo}#{number}"
+        comment_match = re.search(
+            r"repos/([^/]+/[^/]+)/(pulls|issues)/comments/(\d+)", endpoint
+        )
+        if comment_match:
+            repo, resource, comment_id = comment_match.groups()
+            comment_kind = "review" if resource == "pulls" else "issue"
+            return (
+                repo,
+                f"{comment_kind}-comment:id:{comment_id}",
+                f"{repo}:{resource}/comments/{comment_id}",
+            )
         repo_match = re.search(r"repos/([^/]+/[^/]+)", endpoint)
         if repo_match:
             repo = repo_match.group(1)
@@ -2564,6 +2652,10 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
             continue
         if group == "api":
             kind = _api_kind(tokens, operation_cwd)
+        elif group == "repo" and action == "set-default" and "--view" in tokens[3:]:
+            # `gh repo set-default --view` only prints the pinned repository;
+            # the shared conventions prescribe it as a read-only probe.
+            kind = "read"
         elif action in WRITE_ACTIONS.get(group, set()):
             kind = "write"
         elif action in READ_ACTIONS.get(group, set()):
@@ -2592,9 +2684,62 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
                     and not dynamic_scope
                     and not _dynamic_shell_value(hostname)
                 ),
+                created_comment_kind=(
+                    _created_comment_kind(tokens, group, action) if kind == "write" else ""
+                ),
             )
         )
     return operations
+
+
+def _created_comment_kind(tokens: list[str], group: str, action: str) -> str:
+    """Return "issue" or "review" when the write creates one comment."""
+    if group in {"pr", "issue"} and action == "comment":
+        return "issue"
+    if group != "api":
+        return ""
+    endpoint = _api_endpoint(tokens).split("?", 1)[0].rstrip("/")
+    if re.search(r"repos/[^/]+/[^/]+/issues/\d+/comments$", endpoint):
+        return "issue"
+    if re.search(r"repos/[^/]+/[^/]+/pulls/\d+/comments(?:/\d+/replies)?$", endpoint):
+        return "review"
+    return ""
+
+
+_COMMENT_ANCHORS = {
+    "issue": re.compile(r"#issuecomment-(\d+)"),
+    "review": re.compile(r"#discussion_r(\d+)"),
+}
+
+
+def _created_comment_readback_keys(
+    payload: dict[str, Any], operation: GhOperation
+) -> str:
+    """Key of the comment a successful write created, read from its response.
+
+    The prescribed readback of a new comment is the comment's own endpoint
+    (issues/comments/{id} or pulls/comments/{id}), which carries no issue or
+    pull number, so it can only be matched to the pending write through the
+    id the write returned. Prefer the html_url anchor, then the first top-level
+    "id" field, then a bare integer (a `--jq .id` projection). Ambiguous
+    responses yield nothing rather than a guess.
+    """
+    kind = operation.created_comment_kind
+    if not kind:
+        return ""
+    text = _bounded_tool_response_text(payload).replace("\\/", "/")
+    anchors = set(_COMMENT_ANCHORS[kind].findall(text))
+    if len(anchors) == 1:
+        comment_id = next(iter(anchors))
+    else:
+        first_id = re.search(r'"id"\s*:\s*(\d+)', text)
+        if first_id:
+            comment_id = first_id.group(1)
+        elif re.fullmatch(r"\s*\d+\s*", text or " "):
+            comment_id = text.strip()
+        else:
+            return ""
+    return f"{operation.repo_key}:{kind}-comment:id:{comment_id}"
 
 
 def _creation_group(operation: GhOperation) -> str | None:
@@ -2692,6 +2837,48 @@ def _created_target_from_response(
     )
 
 
+_NUMBERED_TARGET_KEY = re.compile(
+    r"^(?P<prefix>.*):(?P<kind>pull|issue|issue-or-pull):number:(?P<number>\d+)$"
+)
+
+
+def _equivalent_workflow_keys(workflow_key: str) -> tuple[str, ...]:
+    """Keys whose read satisfies a live-state or readback check for this key.
+
+    The REST ``issues/{n}`` family cannot tell whether #n is an issue or a
+    pull request, so it is keyed ``issue-or-pull``. A GitHub number belongs to
+    exactly one of the two, so a read of either concrete kind proves the state
+    of an ``issue-or-pull`` write, and a read through the ambiguous family
+    proves either concrete kind. ``pull`` and ``issue`` stay distinct from each
+    other; the shared conventions prescribe ``issues/{n}/comments`` for PR
+    discussion comments, and without this equivalence no prescribed read could
+    ever credit that write.
+    """
+    match = _NUMBERED_TARGET_KEY.match(workflow_key)
+    if match is None:
+        return (workflow_key,)
+    prefix, kind, number = match.group("prefix", "kind", "number")
+    kinds = (
+        ("issue-or-pull", "pull", "issue")
+        if kind == "issue-or-pull"
+        else (kind, "issue-or-pull")
+    )
+    return tuple(f"{prefix}:{item}:number:{number}" for item in kinds)
+
+
+def _preflight_seen(
+    connection: sqlite3.Connection,
+    session_id: str,
+    turn_id: str,
+    workflow_key: str,
+) -> bool:
+    for key in _equivalent_workflow_keys(workflow_key):
+        row = _activity(connection, session_id, turn_id, key)
+        if row is not None and row["preflight_seen"]:
+            return True
+    return False
+
+
 def _activity(
     connection: sqlite3.Connection,
     session_id: str,
@@ -2716,6 +2903,7 @@ def _upsert_activity(
     preflight_seen: int | None = None,
     pending_write: int | None = None,
     pending_summary: str | None = None,
+    readback_keys: str | None = None,
 ) -> None:
     now = isoformat(utc_now())
     with _write_transaction(connection):
@@ -2723,14 +2911,16 @@ def _upsert_activity(
             """
             INSERT INTO hook_activity (
                 session_id, turn_id, workflow_key, workflow_label, repo_key,
-                preflight_seen, pending_write, pending_summary, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                preflight_seen, pending_write, pending_summary, readback_keys,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id, turn_id, workflow_key) DO UPDATE SET
                 workflow_label = excluded.workflow_label,
                 repo_key = excluded.repo_key,
                 preflight_seen = CASE WHEN ? IS NULL THEN hook_activity.preflight_seen ELSE ? END,
                 pending_write = CASE WHEN ? IS NULL THEN hook_activity.pending_write ELSE ? END,
                 pending_summary = CASE WHEN ? IS NULL THEN hook_activity.pending_summary ELSE ? END,
+                readback_keys = CASE WHEN ? IS NULL THEN hook_activity.readback_keys ELSE ? END,
                 updated_at = excluded.updated_at
             """,
             (
@@ -2742,6 +2932,7 @@ def _upsert_activity(
                 preflight_seen or 0,
                 pending_write or 0,
                 pending_summary or "",
+                readback_keys or "",
                 now,
                 preflight_seen,
                 preflight_seen,
@@ -2749,6 +2940,8 @@ def _upsert_activity(
                 pending_write,
                 pending_summary,
                 pending_summary,
+                readback_keys,
+                readback_keys,
             ),
         )
 
@@ -3126,10 +3319,7 @@ def _pre_tool_use(
         violations = [
             op
             for op in writes
-            if not (
-                _activity(connection, session_id, turn_id, op.workflow_key)
-                or {"preflight_seen": 0}
-            )["preflight_seen"]
+            if not _preflight_seen(connection, session_id, turn_id, op.workflow_key)
         ]
         denied = mode == "enforce" and bool(violations)
         outcome = "prevented" if denied else "escaped"
@@ -3311,12 +3501,10 @@ def _post_tool_use(
                     )
 
         for pending in pending_before:
+            accepted_keys = set(_equivalent_workflow_keys(str(pending["workflow_key"])))
+            accepted_keys.update(str(pending["readback_keys"] or "").split())
             matching_read = next(
-                (
-                    read
-                    for read in reads
-                    if read.workflow_key == pending["workflow_key"]
-                ),
+                (read for read in reads if read.workflow_key in accepted_keys),
                 None,
             )
             if matching_read:
@@ -3363,6 +3551,7 @@ def _post_tool_use(
                     preflight_seen=0,
                     pending_write=1,
                     pending_summary=write.summary,
+                    readback_keys=_created_comment_readback_keys(payload, write),
                 )
         if creation_writes:
             _mark_tool_event_completed(connection, session_id, tool_use_id)
@@ -3845,15 +4034,15 @@ def _command_record(args: argparse.Namespace) -> int:
 
 
 def _command_report(args: argparse.Namespace) -> int:
-    connection = connect_database(args.state_dir)
-    try:
-        rows = report_encounters(
-            connection,
-            since_days=args.since_days,
-            min_encounters=args.min_encounters,
-        )
-    finally:
-        connection.close()
+    with report_database(args.state_dir) as connection:
+        if connection is None:
+            rows = []
+        else:
+            rows = report_encounters(
+                connection,
+                since_days=args.since_days,
+                min_encounters=args.min_encounters,
+            )
     if args.json:
         print(json.dumps(rows, indent=2))
         return 0
