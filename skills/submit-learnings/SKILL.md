@@ -1,47 +1,41 @@
 ---
 name: submit-learnings
-description: "Push a personal learnings branch in a managed shared-skills repo and open a pull request for the single reviewer. Use when the user wants to submit their accumulated skill improvements, do the weekly learnings push, share their learnings branch, or gives a terse invocation like `$submit-learnings`. Rebases the learnings branch on the default branch, pushes it, and opens one PR (title prefixed `learnings:`) or adds a new status comment to its existing PR; it does not review or merge. Complements apply-conversation-lessons, which accumulates the commits."
+description: Push accumulated changes from a personal managed-skills branch and open or update its learnings PR. Use when asked to submit or share learnings; does not review or merge.
 ---
 
 # Submit Learnings
 
-## Overview
+Resolve this skill's managed source through its symlink or verified copy ownership
+marker under the shared synchronization procedure; require `.managed-skills`. Use the user's
+personal `learnings/<user>` branch; never submit from the default branch. If another
+non-default branch is intentionally used, identify it in the handoff. Require a
+clean working tree; do not stash, discard, or commit unrelated work.
 
-Use this workflow to submit the skill improvements that `apply-conversation-lessons` has accumulated on a personal branch in a managed shared-skills repo (one marked with a `.managed-skills` file). It pushes the branch and opens one pull request for the repo's single reviewer to check. It does not post reviews or merge — that is the reviewer's step, via `gh-review-pr` and `gh-merge-pr`.
+Follow [GitHub conventions](../gh-workflow-conventions/SKILL.md), including permitted
+publication surfaces and live-state/readback rules. This invocation authorizes the
+branch push and one initial PR or current-state comment, subject to narrower user
+instructions and repository policy.
 
-Follow the shared **gh-workflow-conventions** (read the sibling `gh-workflow-conventions/SKILL.md`): gh-only tooling and `--json` fallback, network/filesystem escalation and bounded watches, CI-after-push polling, commit/push hygiene, and concise tone. This file covers only what is specific to submitting learnings.
+1. Use the shared [safe synchronization procedure](../sync-secquoia-skills/references/branch-sync.md)
+   before pushing. It owns backup creation, conflict handling, and replay proof.
+   Preserve its local backup. After replay, stop with a verified no-op if no changes
+   remain beyond the refreshed default branch.
+2. Compare the remote personal head with the expected pre-sync remote head before
+   pushing. Push with tracking. If only this verified rebase requires a
+   non-fast-forward update, use `--force-with-lease=<branch>:<expected-remote-sha>`; never
+   overwrite another session's intervening push or use plain force.
+3. Reuse an open PR for this head or create one against the default branch with
+   title `learnings: <summary>`. Read the repository template. Describe each changed
+   skill's resulting behavior and relevant validation. Put a shared-layout change
+   near the top, naming moved paths and the need for contributors to sync.
+4. For an existing PR, preserve its title/body and earlier comments unless the user
+   requested that edit. Post one new current-state comment with
+   `<!-- submit-learnings:head=<HEAD_SHA> -->`; skip an exact marker match. Use a
+   body file, live preflight, and exact readback. Do not create a duplicate PR.
+5. Observe current-head checks with the shared bounded CI procedure when CI is
+   configured. Report pending/absent/failing checks explicitly; do not infer green
+   from a watch exit code. Submission does not authorize review or merge.
 
-## Preconditions
-
-1. Confirm this is a managed skills repo: the git repository root contains a `.managed-skills` file. The current working directory is often an unrelated project, not the skills repo — do not assume CWD is it. Resolve this skill's own base directory through any symlinks (`readlink -f`) to its real location, take that file's enclosing git root, and confirm the `.managed-skills` marker there; operate on that repo for the rest of the workflow. If no such repo is found, stop and report that this skill is only for managed shared-skills repos.
-2. Determine the default branch with `gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'`.
-3. Determine the current branch. The working branch must be a personal learnings branch, by convention `learnings/<user>`.
-   - If on the default branch, stop and report: there is nothing to submit from the default branch. Learnings belong on a `learnings/<user>` branch created by `apply-conversation-lessons`.
-   - If on some other non-default branch, treat it as the learnings branch but say so in the final report.
-4. Require a clean working tree. If it is dirty, stop and report — do not stash, commit, or discard changes here; accumulating commits is `apply-conversation-lessons`'s job.
-5. Confirm the branch is actually ahead of the default branch (`git rev-list --count origin/<default>..HEAD` after a fetch). If it is not ahead, stop and report that there are no learnings to submit.
-
-## Workflow
-
-1. Sync with the latest default branch.
-   - `git fetch origin`.
-   - Rebase the learnings branch on the updated default branch: `git rebase origin/<default>`.
-   - If the rebase conflicts, stop and report the conflicting files and the exact state. Do not force resolutions or skip commits; hand back to the user to resolve, since conflicts usually mean two authors changed the same skill lines.
-
-2. Push the branch.
-   - Push with tracking (`git push -u origin <branch>`); use `--force-with-lease` only when the push is rejected solely because of the rebase you just performed, never a plain `--force`.
-
-3. Open or continue the pull request.
-   - Check for an existing open PR for this head branch (`gh pr list --head <branch> --state open --json number,url`).
-   - If none exists, create one against the default branch: `gh pr create --base <default> --head <branch> --title "learnings: <short summary>" --body-file <body_file>`.
-   - If one exists, the push already updated it. Do not edit its title, body, or prior comments unless the user explicitly requested that exact edit. Instead, record `HEAD_SHA="$(git rev-parse HEAD)"` and post a new top-level status comment containing the current summary and `<!-- submit-learnings:head=<HEAD_SHA> -->`; skip it when that exact marker already exists. Do not open a duplicate.
-   - Build the title and summary from the commits since the default branch (`git log origin/<default>..HEAD --oneline` and the diff `--stat`). The summary should list, per skill touched, what changed and why, so the reviewer can assess each learning independently. For a new PR, write it to a body file and pass it with `--body-file`; for an existing PR, use it as the new status-comment body.
-   - When the branch restructures a shared skill — splitting sections into `references/` files, renaming or moving files other contributors also edit — call that out in its own labeled paragraph at the top of the initial body or new status comment. Sibling contributors' in-flight learnings branches still editing the old layout will conflict on rebase, so the reviewer should know to prioritize landing the restructure and to prompt other contributors to sync; state which files moved where so their conflict resolution is mechanical.
-
-4. Report and hand off.
-   - Do not review or merge. Report the PR URL, the branch, the skills touched, and the commit summaries.
-   - State that the single reviewer will review it with `gh-review-pr` and merge with `gh-merge-pr`, after which everyone rebases their learnings branch on the updated default branch.
-
-## Final Response
-
-Return the PR URL, branch name, the list of skills changed with a one-line summary each, whether the PR was created, received a new status comment, or was already current, and any rebase conflict that blocked submission. Keep it concise and professional; no emoji or praise padding.
+Report PR URL, branch/commits, skills changed, backup/replay result, publication
+action, and CI or other remaining gates. The designated reviewer reviews and
+merges; receiving contributors then run `sync-secquoia-skills`.

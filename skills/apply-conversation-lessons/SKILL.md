@@ -1,80 +1,67 @@
 ---
 name: apply-conversation-lessons
-description: Capture lessons learned from the current conversation and implement durable improvements into existing skills (Codex or Claude). Use when the user asks for an end-of-conversation lessons pass, wants takeaways folded into skills, asks what should be improved in skills from recent work, or explicitly invokes $apply-conversation-lessons.
+description: Improve existing skills from a requested conversation-lessons pass. Use for durable workflow changes, not automatic updates after ordinary tasks.
 ---
 
 # Apply Conversation Lessons
 
-## Overview
+Capture reusable lessons when requested. A successful pass may conclude that no
+skill change is warranted. Consider every skill used, including this one, but
+change only the smallest appropriate owner.
 
-Turn recent workflow friction into concise, durable skill updates. Prefer improving existing skills over creating new ones, and keep every edit proportional to the lesson learned.
+## Decide what earns a change
 
-This skill cannot run automatically at every conversation end. Use it when the user invokes it or explicitly asks for a closing lessons-learned pass.
+1. Combine the user's requested changes with evidence from the conversation.
+   Re-read the current target before drawing conclusions from an earlier version.
+2. For a mature shared skill, require an explicit request for the durable change,
+   a missing safeguard against destructive action/security exposure/incorrect
+   external writes, or the same failure in at least three independent episodes
+   under the relevant rule version. Retries and agent switches on one task are
+   one episode. Recurrence makes an edit eligible, not mandatory.
+3. When the encounter runner is available, inspect
+   `python -B <skill>/scripts/encounter_ledger.py report --json` before triage.
+   Use [evidence guidance](references/evidence.md) to interpret its revisions,
+   modes, and model attribution. Do not equate classifier flags with model errors.
+4. Keep lessons that prevent plausible wrong results, silent damage, or repeated
+   expensive rediscovery. Retire one-off facts, obvious recoverable command errors,
+   generic advice, and preferences already supplied by higher-level instructions.
+5. Search for an existing rule and its history. Distinguish an execution miss from
+   a lesson already captured after the event. Clarify or relocate an ambiguous or
+   poorly placed rule; do not append a synonym. Shared rules belong with their
+   shared owner. Prefer a distributable executable guard for deterministic checks
+   when its implementation is within the user's authorized scope.
 
-Treat shared skills as stable by default. The normal successful result of this workflow is often **no skill change warranted**: prose churn is not evidence that the system is learning.
+## Edit and validate
 
-## Workflow
+- Read available skill-creator guidance. Resolve installed symlinks and read each
+  file at the path to be edited; use bounded chunks if output truncates.
+- Before editing a managed/shared repository, follow
+  [managed changes](references/managed-changes.md). Keep user-owned customizations
+  out of plugin caches unless the user specifically requested a cache edit.
+- Keep discovery descriptions short and precise. Put policy, outcomes, and routing
+  in the core; put substantial conditional detail in references. Do not wait for
+  a tool's output limit before reducing unnecessary context.
+- Preserve non-obvious invariants. Account for removed substantive rules as
+  consolidated, relocated, or deliberately retired with reasons. Check that
+  callers reach relocated rules before the action they govern. Independent
+  verification at a handoff can remain necessary even when its wording is shared.
+- Update affected consumers, including authorized private orchestrators, when
+  contracts change. Keep private skill names and contents outside tracked files.
+  Keep shared instructions agent-neutral and frontmatter compatible with both
+  consumers; place client-specific metadata in its supported sidecar/configuration.
+- Validate each changed skill using the available skill-creator validator with
+  absolute paths and a dependency-equipped interpreter. Missing tooling is a
+  validation limitation, not proof of invalid content. Check relative links and
+  relevant sidecar/catalog/install surfaces; run changed executable helpers.
+- For substantial routing or permission changes, use realistic behavioral cases,
+  including requests that must not activate the workflow. For model upgrades,
+  compare against the previous skill and a policy-equivalent minimal baseline;
+  see [evidence guidance](references/evidence.md). Do not infer better behavior
+  from smaller files or passing metadata validation alone.
 
-1. Collect lessons.
-   - Always infer candidate lessons from the current conversation when this skill is invoked.
-   - If the user supplied lessons or requested a specific change, include that input alongside the inferred candidates.
-   - Enumerate every skill used in the session, including this skill, and consider whether each has a durable lesson before narrowing to edits.
-   - When `scripts/encounter_ledger.py` is present, run `python -B <this-skill>/scripts/encounter_ledger.py report` before triage. Its default report requires three independent violation episodes in 30 days and combines Codex and Claude events from the same local ledger. The no-bytecode flag keeps this read-only audit from dirtying a managed skills checkout with `__pycache__` files.
-   - Ask a follow-up only when a likely edit would be risky or ambiguous. Do not invent user preferences as facts.
+## Handoff
 
-2. Triage each lesson.
-   - For a mature shared skill, require one of these before editing: the user explicitly requested this exact durable change; a missing safeguard could cause destructive action, security exposure, data loss, or an incorrect external write; or the same failure appears in at least three independent workflow episodes while the relevant rule version was already installed. A retry, several attempts in one conversation, or switching agents on the same target is one episode. Otherwise report or queue the candidate without editing.
-   - Crossing the recurrence threshold makes a candidate eligible for judgment; it does not make an edit automatic, and the report is recurrence evidence rather than permission. Inspect the recorded revisions and outcomes with `report --json`, since the default text output omits revisions: discount episodes recorded under a rule or classifier revision that a later fix superseded, and targets nothing could have verified, such as a dynamically scoped or opaque operation that escapes by construction. In audit mode `prevented` cannot occur and every violation records as `escaped`, so an all-escaped report measures opportunity volume, not guard failure; that contrast only carries signal once enforcement is installed. A repeatedly `prevented` mistake usually proves the guard is working, while an `escaped` deterministic mistake surviving those discounts calls for enforcing the existing rule rather than another prose synonym.
-   - Keep lessons that are reusable, procedural, and likely to prevent repeated friction.
-   - Drop one-off project facts, transient tool outputs, personal notes, and broad style preferences already covered by system instructions.
-   - Apply a cost test before keeping: a lesson earns its bytes only when missing it produces a confidently wrong outcome — a plausible-but-wrong result, silent damage, an improvised "fix" that makes things worse — or repeated expensive rediscovery. A miss whose failure is immediate and legible (a command erroring with a clear message and an obvious correction) self-corrects at runtime; drop it, since encoding it taxes every future read of the skill without preventing anything.
-   - When a kept lesson is mechanically checkable — a command pattern to avoid, a file-state precondition, a known false-positive signature — prefer an executable guard over prose: automation fires every time, while prose depends on recall. The guard must be as distributable as the prose it replaces: use harness-agnostic forms the shared repo can ship and every consumer can adopt (a git hook, a lint/CI rule, a repo script), not one agent's private settings or hook config, which serve a single agent on a single machine and cannot travel through the shared-repo review pipeline. Propose the guard and implement it only with the user's authorization; keep a prose form when no shareable guard exists, or for the judgment part a guard cannot express.
-   - Search the candidate target for each lesson before editing. If the guidance is already stated, check its history when timing matters: classify the episode as an execution miss only when the rule existed then; if another pass added it afterward, classify it as already captured. In either case, report the existing rule and do not add synonymous instructions unless the conversation exposed a missing or ambiguous instruction. In a long or resumed session the conversation is itself a stale source: a candidate inferred from earlier tool output can describe a file an intervening sync has already restructured, so re-measure and re-read at the real path before proposing anything. This bites hardest on structural findings — acting on the earlier reading means recommending a refactor that is already merged, with a session transcript that looks like solid evidence for it.
-   - A rule that keeps being violated across sessions despite being present is evidence of misplacement, not absence. Relocate it to the exact workflow step where the violation happens, or sharpen its trigger wording there, instead of adding a rephrased twin elsewhere — two synonymous statements of one rule dilute both and make future consolidation harder.
-   - Map each kept lesson to the smallest relevant existing skill. Create a new skill only if no existing skill has a natural ownership boundary.
-   - When a lesson applies across several sibling skills that share a conventions subskill (for example the `gh-*` skills that read `gh-workflow-conventions`), map it to the shared subskill instead of repeating the change in each skill. Keep a lesson in a single skill only when it applies there alone.
-
-3. Edit skills conservatively.
-   - Read each target skill completely before changing it, at the *real* path you will edit. A skill loaded earlier in the session was very likely read through its symlink in the agent's skills home, and read-before-edit guards track the literal path: editing the resolved file then fails with "file has not been read yet" even though you have its full contents in context. Resolve the symlink first (`ls -la <skills-home>`) and re-read the target under its real path before the first edit.
-   - For large skills or several target files, make the full-read proof explicit: get `wc -l`, read one file at a time in numbered ranges, and verify the ranges cover every line before editing. A single oversized or multi-file tool output can be truncated while looking plausible; if the transcript reports truncation or skips an expected range, re-read the missing chunks before acting on the file.
-   - If the target skill lives in a shared or managed repo, follow "Shared Or Managed Skill Repos" below before editing: commit on a personal branch, never the default branch.
-   - Prefer durable user-owned skills under the agent's skills home: `$CODEX_HOME/skills` (or `~/.codex/skills`) for Codex, and `~/.claude/skills` for Claude. When a Claude skill is a symlink into `~/.codex/skills`, edit the real Codex file; that single source updates both agents. Do not edit plugin cache skills under `.codex/plugins/cache/` (or an equivalent Claude plugin cache) unless the user explicitly asks for that; cache edits may be overwritten.
-   - When the user explicitly keeps a personal skill inside a managed repository's ignored local-skills directory, prefer one generic ignored root over a skill-named ignore entry so tracked metadata does not disclose the private skill's identity. Resolve the installed symlink to its real folder and confirm every skill file is ignored with `git check-ignore -v` before editing. Treat it as a valid lesson target, edit and validate it locally, and report it as local-only; never stage, commit, push, submit, or copy its contents into a tracked skill. If any file is not ignored, stop before editing that skill and repair or confirm the privacy boundary first. After editing, verify its local agent install links still resolve to the ignored folder; do not add the skill to a shared installer, catalog, README, or other tracked discovery surface.
-   - A single-source skill shared by both agents is read by Claude AND Codex, so keep the lesson's wording agent-neutral: describe the underlying tool/CLI behavior (`gh`, `git`, pytest, command-prefix permission matching) rather than one agent's specifics. Route a genuinely agent-specific lesson — for example Claude Code's `Bash(cmd:*)` allowlist syntax or a Codex-only setting — to that agent's own skills home instead of the shared file, or state it agent-neutrally if the concept applies to both.
-   - The same split applies to frontmatter *fields*, not just body wording: a single-source shared skill must use only the fields both agents accept (`name`, `description`, and where supported `license`, `allowed-tools`, `metadata`). Claude-only extensions such as `model`, `effort`, `context`, `agent`, `disallowed-tools`, or `disable-model-invocation` fail Codex's frontmatter validator (it rejects unknown keys) and are ignored by Codex at runtime, so a lesson needing them must go to a Claude-only skills home rather than into the shared file.
-   - If a lesson maps only to a plugin-cache skill, report it as an unimplemented candidate unless creating or updating a user-owned skill is clearly warranted.
-   - If updating skills, follow the `skill-creator` principles when available: read it from its listed source locator, then keep changes concise with no auxiliary docs or references unless they are genuinely needed.
-   - Add the lesson at the workflow point where a future agent would need it; avoid duplicating nearby rules.
-   - Check the target file's size before appending (`wc -c <SKILL.md>`; roughly 4 bytes per token). When the file is at or past the size a single file-read tool call returns (about 25k tokens / 100 KB), do not append another bullet: every consumer following a "read the sibling file" pointer now gets silently truncated content. Instead fit the lesson by tightening or merging overlapping bullets, or move detailed sections into topical `references/` files the core skill points to (progressive disclosure), and verify the relocation line-by-line per the rule above. Report the size pressure in the final response even when the lesson itself was small.
-   - Growth is a cost well below that hard limit: a conventions file that only ever accumulates converges on being skimmed rather than followed, which defeats every lesson in it. When adding to a mature skill, also look for a neighboring bullet the new lesson subsumes, one that fails the cost test above, or one restating a sibling, and merge or retire it in the same edit — accounting for every removed line under the relocation rule below.
-   - Removing duplication is *relocation*, never deletion. Before finalizing, read the removed lines (`git diff -U0 | grep '^-'`) and account for each one: relocated to the shared subskill, preserved verbatim, or deliberately dropped with a stated reason. Watch for the failure where a "just deduplicating" edit quietly deletes an independent check — when a downstream skill re-verifies an upstream skill's work, that redundancy is deliberate. A handoff should remove the retyping, not the checking.
-   - Treat shared convention subskills as first-class edit targets. When a skill delegates rules to a referenced subskill, put cross-cutting lessons in the subskill and leave the referencing skills' pointers intact rather than re-inlining the rule in each one. If a subskill edit changes an output or decision contract, search every consumer — including orchestrators and authorized ignored private skills — for pointers, assumptions, or compensating logic tied to the old contract; update and validate each affected consumer under its ownership and privacy rules. If the edit changes the subskill's `description` triggers, update those as well.
-   - Preserve frontmatter unless the trigger behavior itself changes. Update any sidecar agent metadata that is present (for example `agents/openai.yaml`) only when its user-facing metadata becomes stale.
-
-4. Validate.
-   - Run the skill validator for every changed skill when available. The validator ships with the `skill-creator` system skill, not with the edited skill's own repo: run `python -B <skill-creator>/scripts/quick_validate.py <skill-folder>` (e.g. `python -B ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py <skill-folder>` for Codex, or the equivalent under the Claude skills home). A skills repo shipping no validator of its own does NOT mean none is available — locate `skill-creator` before concluding validation is impossible.
-   - Pass the skill folder as an absolute path, or re-anchor to the skills repo root in the same command. The shell's working directory persists from earlier work in other repositories (a lessons pass often interleaves with edits elsewhere, such as a repo-doc PR), and a relative `skills/<name>` path then fails with a misleading `SKILL.md not found` even though the skill is fine.
-   - If the validator script exists but is not executable, retry it with the appropriate interpreter such as `python -B <validator> <skill-folder>` before treating validation as unavailable.
-   - The validator imports PyYAML, which a bare system interpreter often lacks; `ModuleNotFoundError: No module named 'yaml'` is a wrong-interpreter result, not a broken validator or an invalid skill. Re-run it under an interpreter that has the dependency — a conda base environment or any project virtualenv on the machine — rather than installing anything or falling back to manual inspection. Probe candidates with a one-line `import yaml` check instead of guessing, since a repo-local virtualenv is frequently the one that does *not* have it.
-   - If validation tooling is unavailable, at least inspect frontmatter, required fields, and Markdown structure.
-   - Report any skill that could not be edited or validated.
-
-## Shared Or Managed Skill Repos
-
-Some skills are distributed through a shared repository that a single reviewer curates (for example a private research-group or class repo). Treat a skill as *managed* when its real folder is inside a git repository that has a remote you do not solely own, or the repository root contains a `.managed-skills` marker, or its README/CONTRIBUTING says so.
-
-In a managed repo, never edit the default branch in place and never push automatically:
-
-- If the managed checkout is not writable in the current environment, create a writable temporary worktree on a short-lived branch from the personal learnings branch. Edit, validate, and commit there; then fast-forward the personal branch to that commit and remove the temporary worktree/branch. Do not bypass the environment's file-edit safeguards with shell rewrites.
-- Commit lessons on a personal working branch. If the working tree is on the default branch, create `learnings/<user>` from the current default branch first, then commit there with a clear message. Before writing the message, check `git log --oneline -5 -- <target file>` (or the repo's recent history) for an established convention — for example a shared `learnings:` prefix — and match it instead of inventing a new style, since the same `gh-review-pr`/`gh-merge-pr` skills will later process this branch's history.
-- If the personal branch already has uncommitted skill changes, inspect them before editing. When they are valid accumulated lessons, validate and commit them before finalizing the pass (use separate commits when practical); when they are unrelated or ambiguous, leave them untouched and report that they must be resolved before `submit-learnings` can run. Commit such a pre-existing change by content, not by path: `git commit --only <path>` re-reads that path from the *working tree* at commit time, so if a concurrent session replaced its contents between inspection and commit, you publish the new text under a message describing the old text. Re-inspect immediately before committing, or commit from the staged snapshot with only that path staged and no `--only`, then confirm the resulting `git show` diff is the text you meant to describe.
-- Another session can be editing the same managed checkout *while* this pass runs, so treat that check as continuous rather than a one-time gate at the start. Commit each lesson as soon as it is written and validated instead of editing several files and staging everything at the end: that long uncommitted window is exactly what lets a concurrent session's commit sweep your working-tree edits into its own, leaving your lessons on the branch under someone else's message. Before any staging or recovery step, re-read `git log --oneline -3` and `git status`; if HEAD moved during the pass, search it for your own marker phrases (`git log -S"<phrase>" --oneline`) to check whether your edits are *already committed* before staging them again — draw `<phrase>` from the text you actually inserted into the file, not from your commit message: `-S` pickaxes diff content, so a message-only phrase that never appears in the file returns nothing and reads as data loss even though the edit is safely committed and merely buried under newer commits. When they are, verify the content and report the attribution — do not rebase or amend to reclaim them, since the other session may still be building on that history. Hunk-level staging is only a partial defence: `git apply --cached` cannot split contiguous changed lines, so a foreign bullet added directly beside your edit rides along with it.
-- When the user asks to adopt lessons from another contributor's learning branch, do not branch from or merge that contributor branch. Switch to the user's personal branch, restore or copy only the selected skill paths from the source branch, then validate and commit those copied files there. Check `git status --porcelain -uall` so newly added skill folders are not missed by diff-only inspection.
-- Accumulate lessons on that branch across sessions. Do not open or push a pull request on every invocation; the repo's cadence (for example a weekly push reviewed by a single reviewer) owns that step.
-- Before starting new edits, sync the personal branch with the latest default branch so already-merged updates from others are incorporated and conflicts surface early — the sibling `sync-secquoia-skills` skill owns that procedure (fetch, rebase, and refresh of installed skill links); use it, or its manual fetch-and-rebase equivalent when it is unavailable. Keep each lesson small and self-contained to minimize cross-author merge conflicts.
-- When the user asks to submit accumulated learnings, hand off to the `submit-learnings` skill (it rebases on the default branch, pushes the personal branch, and opens one PR); the single reviewer then reviews with `gh-review-pr` and merges with `gh-merge-pr`. This serializes changes through review instead of colliding on the default branch.
-- Route a lesson that is genuinely personal and not meant for the shared set outside the managed repo by default. When the user explicitly chooses the ignored local-skills exception described above, keep it there but exclude it from every managed-repo commit and submission.
-
-## Final Response
-
-Summarize the lessons implemented, the skills changed, validation performed, and any lessons intentionally declined as too broad or one-off. Always state whether this skill itself changed or was intentionally left unchanged, with the reason, because invoking it makes it a natural candidate target. In a managed repo, also report the personal branch used and that submitting the accumulated learnings for review is a separate, user-initiated step.
+Report implemented and declined lessons, changed skills, validation, and remaining
+limitations. State whether this skill changed and why. For managed skills, report
+the personal branch and local commits; submission is a separate user-initiated
+workflow.
