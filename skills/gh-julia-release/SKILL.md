@@ -13,7 +13,9 @@ steps; it does not authorize changing the package's distribution policy.
 
 Resolve the package, version, and distribution policy from `Project.toml`,
 maintained release documentation, workflows, and settled decisions. If General
-versus URL-only remains undecided or contradictory, settle that before publishing.
+versus URL-only remains genuinely undecided or contradictory after those checks,
+ask the user to decide before publishing. Reuse an explicit decision already made
+in this task; routine release preparation does not need another confirmation.
 Never introduce Registrator or TagBot to a URL-only package as a convenience.
 
 Inspect existing tags, releases, open release PRs, CI, and applicable registry PRs
@@ -36,7 +38,9 @@ checkout based on the fresh remote default branch.
 - Push and open the release PR when changes are needed. Verify current-head
   required checks and mergeability before merging; do not bypass CI.
 - Before publishing, verify the exact release commit and its default-branch
-  push checks, when configured. Reuse valid evidence for an unchanged commit.
+  push checks, when configured. Reuse local verification when its relevant source,
+  tests, inputs, and environment remain unchanged; live publication gates still
+  require evidence for the exact release commit.
 
 ## Publish through the chosen path
 
@@ -48,8 +52,9 @@ Ordinary comments can pause AutoMerge; comment only when needed, using
 Inspect TagBot and allow it to finish before attempting manual recovery.
 
 **URL-only:** Immediately recheck both the tag and release. Verify existing
-artifacts and complete only missing steps; never silently retarget or recreate
-them. When absent, create an annotated `vX.Y.Z` tag on the verified green release
+artifacts and complete only missing steps; retargeting or recreating an existing
+artifact requires explicit user authorization. Announcing the action is not
+authorization. When absent, create an annotated `vX.Y.Z` tag on the verified green release
 commit, push it, then create a non-draft GitHub release from that tag. Verify the
 remote annotated tag and its dereferenced commit. Observe tag-triggered workflows.
 
@@ -69,7 +74,8 @@ with a new depot after a bounded wait and report propagation pending if necessar
 
 Verify the GitHub release and relevant workflows. For either distribution path,
 require the tag's dereferenced SHA (not its tag-object SHA) to equal the verified
-release commit. A mismatch stops publication completion; never retarget it silently.
+release commit. A mismatch stops publication completion; apply the same explicit
+authorization boundary before any retargeting.
 A release's branch-valued `targetCommitish` does not override
 the tag's actual target. For a repository with Zenodo integration or an explicit
 archive request, load [archive verification](references/zenodo.md).

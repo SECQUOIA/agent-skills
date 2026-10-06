@@ -62,6 +62,8 @@ public fork URL stops serving the site, allowing bounded CDN propagation. A
 post-delete API 404 corroborates the known deletion but is not sufficient by
 itself to prove public takedown.
 
-Report repository/host, relevant run or deployment links, canonical URL,
-published-content evidence, changes made, and any pending propagation or access
-limitations.
+Report the final state explicitly: deployed/current, stale, pending, failed,
+disabled, or unverified, with the evidence supporting that classification. Include
+repository/host, relevant run or deployment links, canonical URL, published-content
+evidence, changes made, and any pending propagation or access limitations. If no
+change was needed or authorized, say that no settings or workflows were changed.

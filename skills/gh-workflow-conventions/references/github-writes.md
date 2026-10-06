@@ -67,6 +67,8 @@ proven-unapplied targets, in smaller batches if needed.
   SHAs through Git/API, never guess them. Read numeric values in the stated source
   artifact at the stated ref; do not reconstruct a “source” value from rounded
   output. Inspect prepared bodies for accidental secret values.
+  For DOI/publisher links, use [scientific verification](scientific-verification.md);
+  publisher anti-bot 403/429 responses alone do not establish a broken DOI.
 - Target replies to the latest actionable comment ID. GitHub may attach a nested
   reply to the root; retain the addressed-comment marker and exact permalink.
 - For review requests, verify `reviewRequests`, not an earlier approval. If a

@@ -37,6 +37,10 @@ Use for target/ref identity and complete inventories. For CLI failures, use
 - Read every file supporting a claim at the inspected ref, including unchanged
   dependencies: `git show <head>:<path>` or `contents/<path>?ref=<head>`. Use the
   refreshed base/head merge-base diff, not `HEAD^..HEAD`, for PR scope.
+  For files larger than 1 MB, the contents API can return `encoding: "none"` and
+  empty `content`. Re-read that same ref-pinned endpoint with
+  `-H 'Accept: application/vnd.github.raw'` before calling it empty or unavailable;
+  save large responses and inspect only the relevant sections.
 - A historical commit unavailable to local fetch can still be valid provenance.
   Verify it and its exact file through `gh api`; distinguish GitHub availability
   from local object availability.

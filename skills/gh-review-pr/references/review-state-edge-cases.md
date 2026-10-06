@@ -4,7 +4,7 @@ Read when encountering repeated reviews, explicit source edits, author/draft/ter
 
 ## Repeat reviews
 
-A direct user invocation at an already-reviewed head is a request for a new independent review. Form conclusions before reading the prior verdict to avoid anchoring, then reconcile existing findings and explain what the new review supersedes. Explicit no-post/report-only limits still apply. Automated or orchestrated re-entry must reuse the existing same-account `gh-review-pr:sha` sentinel instead of stacking duplicate reviews.
+A direct user invocation at an already-reviewed head is a request for a new independent review. Form conclusions before reading the prior verdict to avoid anchoring, then reconcile existing findings and explain what the new review supersedes. Explicit no-post/report-only limits still apply. On automated or orchestrated re-entry, an existing exact same-account `gh-review-pr:sha` sentinel stops the review/posting pass; report its link instead of repeating the review or stacking a duplicate verdict.
 
 When the head advanced, prioritize its delta and prior findings while rechecking the full PR changed-file identity, metadata, relevant dependencies, and live gates. Carry earlier expensive evidence forward when its inputs, source, environment, and contracts remain valid; explain why. Recheck claims tied to the new head, including counts, generated outputs, scope and support claims. A resolved thread can conceal a limitation or regress after a broad revert; assess its actual remedy.
 

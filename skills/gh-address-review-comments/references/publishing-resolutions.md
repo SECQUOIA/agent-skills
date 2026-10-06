@@ -8,8 +8,9 @@ Use:
 
 - Summary: `<!-- gh-arc:sha=<HEAD_SHA>:batch=<BATCH_ID>:target=summary -->`
 - Inline reply: `<!-- gh-arc:sha=<HEAD_SHA>:comment=<COMMENT_ID> -->`
+- New feedback on an already marked same-head target: `<!-- gh-arc:sha=<HEAD_SHA>:batch=<BATCH_ID>:comment=<COMMENT_ID> -->`
 
-Read existing top-level/review comments before posting and skip exact marker matches. A prior unmarked reply is evidence, not marker-based idempotency. A previously handled target needs no repeated identical reply when its marker is current and no newer feedback arrived. A same-head metadata/deferral cycle can still need a new batch summary. If genuinely new feedback arrives on an already marked same-head target, include the batch component in that new reply marker so the old marker cannot suppress a new disposition.
+Read existing top-level/review comments before posting and skip exact marker matches. A prior unmarked reply is evidence, not marker-based idempotency. A previously handled target needs no repeated identical reply when its marker is current and no newer feedback arrived. A same-head metadata/deferral cycle can still need a new batch summary. For genuinely new feedback on an already marked same-head target, use the exact batch-qualified reply marker above so the old marker cannot suppress a new disposition.
 
 Post one new summary per distinct batch; never rewrite prior summaries, replies, or PR metadata without explicit authorization. Link superseded text when useful. Include fixing commits, changes, validation/current CI, target-specific dispositions, and outstanding risks/gates. Cover body-only findings by stable marker/title instead of inventing inline targets. Lead with declined Blocking items and the required human decision.
 

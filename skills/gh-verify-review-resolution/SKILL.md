@@ -50,4 +50,4 @@ Use exactly these numbered sections:
 5. Whether another review round is justified
 6. Recommended next action
 
-Begin section 5 with `No`, `Targeted`, or `Full`. Include separate source-report coverage when relevant, evidence reused and its basis, declined Blocking items, and verified closeout results if requested. Otherwise recommend the appropriate next action without executing it. Offer an eligible outcome review when all items are Addressed; an author cannot formally approve their own PR.
+Begin section 5 with `No`, `Targeted`, or `Full` and explain the reason. For `Targeted`, include the bounded review question and compact re-review brief above; for `Full`, state why a reliable narrower assessment is not possible. Include separate source-report coverage when relevant, evidence reused and its basis, declined Blocking items, and verified closeout results if requested. Otherwise recommend the appropriate next action without executing it. Offer an eligible outcome review when all items are Addressed; an author cannot formally approve their own PR.

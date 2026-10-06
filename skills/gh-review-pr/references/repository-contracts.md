@@ -19,3 +19,5 @@ For renamed job/status contexts, compare emitted checks with live required conte
 Build the affected site when practical, or use an authoritative same-head build with focused static/artifact checks when that settles the claim. Inspect rendered markup, relative/base-path links, and shipped syntax rather than only source assertions. A changed block start can render intended HTML as escaped code while links still pass. Verify the intended deployment owner and distinguish preview URLs from the canonical site.
 
 For citation files use the relevant schema validator when available, not YAML parse alone. Check that the author roster and provenance match the stated scope; do not broaden an author list by inference.
+
+For DOI links returning access errors such as 403 or 429, use the [DOI verification guidance](../../gh-workflow-conventions/references/github-troubleshooting.md) before calling the citation broken.

@@ -26,6 +26,11 @@ Read the relevant reference when its condition applies, not every reference.
   documented outputs; “commit and push only,” “draft,” or “do not post” narrows
   them. Do not infer permission for another publication surface, access change,
   destructive cleanup, or an edit to published history.
+- Subagents inherit scope and read-only restrictions, but publication authority
+  stays with the parent unless the user explicitly delegates it. Have subagents
+  return their findings and evidence; the parent verifies the claims and publishes
+  once. Reuse sound evidence when relevant source, tests, inputs, and environment
+  remain applicable; delegation alone does not require repeating experiments.
 - Existing PR titles/bodies, submitted reviews, comments, and replies are immutable
   by default. Add new information unless the user requests the particular edit.
   A skill's explicit idempotent maintenance contract may include updating its
@@ -51,6 +56,10 @@ Read the relevant reference when its condition applies, not every reference.
 - Protect user changes before checkout, reset, probes, or cleanup. A backup branch
   preserves commits, not uncommitted work. Prefer isolation when safe in-place
   work is uncertain. Preserve credentials and treat shell payloads as data.
+- During reads as well as writes, never interpolate copied issue/review text into
+  executable shell syntax. Backticks and `$()` still execute inside double quotes.
+  Use a safely single-quoted fixed string (`rg -F -- 'literal'`), or a pattern/query
+  file for text containing quotes or other shell-sensitive characters.
 
 ## Conditional references
 
