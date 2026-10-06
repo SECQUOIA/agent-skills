@@ -1,4 +1,4 @@
 interface:
   display_name: "GitHub Pages Deployment"
-  short_description: "Debug and manage GitHub Pages and other hosted documentation deployments"
+  short_description: "Diagnose Pages and hosted documentation deployments"
   default_prompt: "Use $gh-pages-deployment to investigate why my documentation site did not deploy or is stale."

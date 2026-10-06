@@ -1,4 +1,4 @@
 interface:
   display_name: "Verify Review Fixes"
   short_description: "Verify PR feedback was addressed"
-  default_prompt: "Use $gh-verify-review-resolution <PR-number-or-url> to check whether review comments or a referenced review report were addressed without modifying anything."
+  default_prompt: "Use $gh-verify-review-resolution <PR-number-or-url> to assess existing feedback at the current head without changing the original checkout or GitHub state."

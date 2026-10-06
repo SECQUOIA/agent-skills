@@ -1,0 +1,15 @@
+# Scratch verification
+
+Read before executing a verification check. Preserve the original checkout's files, index, HEAD, branches, and Git metadata. Temporary query files and independent scratch repositories are allowed; tests may run there unless the user prohibited execution.
+
+Materialize the complete exact PR head in scratch, using existing objects read-only or fetching into a scratch repository. Do not copy an arbitrary checkout and overwrite only PR-changed files: unchanged dependencies and local-only additions may differ. An archive of a verified head is suitable for checks that do not require Git; otherwise use a disposable repository with the exact commit. Verify SHA/tree identity and required submodules/LFS objects before trusting results. Do not create an original-repository worktree or fetch into its metadata under this workflow's default boundary.
+
+A correct tree on disk does not establish runtime identity. Editable installs and import hooks may still point to the user's checkout. Use the repository's supported environment/import mechanism to load scratch source and assert resolved module paths (or equivalent package provenance). Consult shared [checkout guidance](../../gh-workflow-conventions/references/worktrees-and-checkouts.md) and [test environment](../../gh-workflow-conventions/references/test-environment.md). Attribute missing-Git or fixture failures to reconstruction when appropriate, not to the PR.
+
+Select new tests according to what the address delta changes. Prior evidence may carry forward when relevant inputs/contracts/source/environment are unchanged. A semantic diff or AST comparison can support an inert-source claim, but does not prove artifact freshness or unchanged dependency behavior. Changes to measured test counts require current matching-lane evidence; optional dependencies can alter collection.
+
+Use a base-plus-head-test reproduction or a focused defect mutation only when needed to settle coverage or a consequential regression. A whole-file swap across an API rename may fail for the wrong reason; retain the head API and reintroduce only the original defect in scratch. For tests newly covering pre-existing behavior, target that behavior rather than trying to revert a nonexistent production fix. Read shared [mutation safety](../../gh-workflow-conventions/references/mutation-testing.md) before doing so; preserve a pristine baseline and verify the intended assertion, not just a failing command.
+
+For Git configuration behavior, reconstruct the exact relevant configuration in a disposable repository and use Git's own evaluator (for example `check-ignore`) rather than changing the original repository. For artifacts, trace reachable changed behavior and reuse proven-unaffected outputs; validate affected outputs under shared artifact guidance.
+
+Remove disposable execution state after recording useful evidence, preserve any user-requested deliverable, and verify the original workspace remains unchanged. Report unrun checks and reconstruction limits explicitly.
