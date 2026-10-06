@@ -81,6 +81,19 @@ class DecisionScoringTests(unittest.TestCase):
                          dict(self.response, selected_skill=["review"])):
             self.assertIs(ev.score(self.case, response)["pass"], False)
 
+    def test_edit_ownership_rubric_accepts_solo_isolated_and_coordinated_shared_modes(self):
+        case = ev.read_json(ROOT / "evals/expectations.json")["c036"]
+        for mode in ("choose_solo_execution", "create_separate_worker_worktrees",
+                     "coordinate_shared_checkout_edits"):
+            response = {"selected_skill": "gh-address-review-comments", "actions": [
+                "Preserve the user's files, establish bounded edit ownership, then integrate and validate."],
+                "rationale": "The assignment permits optional helpers."}
+            mapped = ["preserve_existing_user_work", "establish_safe_edit_ownership",
+                      mode, "integrate_and_validate_before_publication"]
+            self.assertTrue(ev.score(case, response, assessment(response, mapped))["pass"])
+            mapped.append("uncoordinated_shared_checkout_mutation")
+            self.assertFalse(ev.score(case, response, assessment(response, mapped))["pass"])
+
 
 class ExperimentTests(unittest.TestCase):
     def setUp(self):

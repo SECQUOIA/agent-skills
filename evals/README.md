@@ -2,9 +2,10 @@
 
 Keep instructions, decisions, executed behavior, and performance claims separate.
 This directory supplies an inexpensive decision simulation and a small disposable
-Git/fake-`gh` execution fixture. Neither starts a model, makes network calls, or
-spends inference credits on its own. Model adapters are opt-in executables supplied
-by the experiment operator; scripted test adapters are labelled as such.
+Git/fake-`gh` execution fixture and a scripted concurrent Git exercise. None starts
+a model, makes network calls, or spends inference credits on its own. Model adapters
+are opt-in executables supplied by the experiment operator; scripted test adapters
+are labelled as such.
 
 ## Decision comparisons (format 3)
 
@@ -38,12 +39,15 @@ rubric labels, and the former action-ID menu. Responses propose steps in their o
 words. Facts needed to decide an outcome must still appear in observations; this
 reduces the earlier cues without pretending to eliminate all benchmark cues.
 
-The 33 cases cover all 12 callable workflow roles, plus a general-question negative
+The 43 cases cover all 12 callable workflow roles, plus a general-question negative
 control. They include submission lease races, replay no-ops and existing-head
 markers; merge review and head gates; triage scope; delegation and publication
 boundaries; repository authorization; release tag, propagation, and exact-commit
-checks; and isolated synchronization integration. This is representative coverage,
-not an exhaustive proof. `gh-workflow-conventions` is a shared reference.
+checks; and isolated synchronization integration. Ten additional cases cover solo
+execution with and without delegation tools, bounded child authority, workspace
+ownership, conflicting results, late evidence, active cancellation, competing
+publishers, nested delegation limits, and integration tests. This is representative
+coverage, not an exhaustive proof. `gh-workflow-conventions` is a shared reference.
 
 ### Adapter contract
 
@@ -172,6 +176,8 @@ selected policy arm. The run command accepts optional `--model`,
 `--model-identity-source`, `--reasoning-effort`, `--client-version`, and `--policy-arm`
 labels; unknowns stay null, and labels are operator-supplied. This fixture does not
 inject skill documents or verify that an adapter supplied its labelled policy.
+Its JSON state is intentionally a single-writer fixture; it does not serialize
+multiple publishers or validate a distributed publication lock.
 
 Run harness checks without a model or network:
 
@@ -184,6 +190,43 @@ a stale head, duplicate a write, target another repository, or discard local wor
 Catching those faults validates the fixture and assertions, not model performance.
 Broader release candidates still need representative end-to-end workflow trials.
 
+### Optional delegation exercise
+
+`delegation_fixture.py` is a separate **scripted-only** local exercise driven by
+`tests/test_delegation_fixture.py`. It does not expose a model adapter, install a
+scheduler, or become a dependency of any skill. Actual threads synchronize at a
+barrier before writing and committing in separate Git worktrees and branches;
+the test driver is the sole integrator. The same independent changes also run
+sequentially in one integration checkout with no worker assignments, producing the
+same final tree and outcome.
+
+The five checks cover:
+
+- Solo and concurrent execution equivalence while dirty user files, the user
+  branch, index, and commit remain unchanged.
+- A real conflicting cherry-pick sequence, aborted only in the owned integration
+  checkout, with both worker commits and worktrees retained.
+- Changed source or edits after a handoff, retaining the original result identity
+  and requiring review before reuse. This fixture conservatively quarantines any
+  source revision change; real workflows can selectively reuse evidence after
+  establishing that relevant source, tests, and environment still match.
+- Cancellation requested while a writer remains active, then actual completion
+  of its outstanding operation. Partial work remains preserved and is not
+  accepted as a finished result. This does not test process-tree termination by a
+  particular client or operating system.
+- Independently passing producer/consumer tests whose combined roundtrip fails
+  on the integrated tree. A clean Git merge is distinct from a valid result.
+
+Completed handoffs record source commit/tree, result commit/tree, branch, paths,
+and directory. These are fixture observations, not a mandatory solo report format.
+No network, GitHub write, multi-publisher lock, or model decision is exercised.
+Decision cases cover publication ownership, but executed cross-session publisher
+coordination and full end-to-end model workflows remain unvalidated.
+
+```bash
+python -B -m unittest discover -s tests -p test_delegation_fixture.py -v
+```
+
 ## Historical results
 
 [validation-2026-10-06.md](validation-2026-10-06.md) records the earlier format 2
@@ -191,4 +234,6 @@ candidate decision smoke trial. Its [15 original cases](history/cases-v2.json)
 are retained for provenance. The 15/15 score applies only to that cue-rich,
 action-menu decision trial, with unknown deployment/effort/client metadata.
 There was no comparative or executed model-workflow trial. It does not carry over
-to the 33 current cases or establish a performance improvement.
+to the 43 current cases or establish a performance improvement. Appending cases
+does not retroactively grade earlier trials; existing hashes and recorded scores
+remain attached to their original case sets.

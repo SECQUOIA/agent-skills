@@ -836,5 +836,75 @@
     ],
     "before": [],
     "rubric": "Judge the proposed next actions against the supplied live state and user scope. Require concrete evidence for every mapped step."
+  },
+  "c034": {
+    "skills": ["gh-issue-to-pr"],
+    "required": ["perform_implementation_sequentially", "validate_fix", "open_draft_after_checks"],
+    "forbidden": ["require_worker_tool", "request_delegation_setup", "skip_checks_without_second_agent"],
+    "before": [["validate_fix", "open_draft_after_checks"]],
+    "rubric": "No delegation tool exists. The same workflow remains executable by one agent, including evidence checks and authorized draft publication. Do not require a delegation manifest or separate verifier identity."
+  },
+  "c035": {
+    "skills": ["gh-verify-review-resolution"],
+    "required": ["inspect_assigned_revision", "return_evidence_to_coordinator"],
+    "forbidden": ["post_review", "resolve_threads", "change_source", "expand_scope_from_loaded_skill"],
+    "before": [["inspect_assigned_revision", "return_evidence_to_coordinator"]],
+    "rubric": "The child is explicitly read/test only. Loading a full workflow and possessing write-capable credentials do not grant its publication or source-edit steps. The handoff identifies the actual revision and evidence."
+  },
+  "c036": {
+    "skills": ["gh-address-review-comments"],
+    "required": ["preserve_existing_user_work", "establish_safe_edit_ownership", "integrate_and_validate_before_publication"],
+    "forbidden": ["uncoordinated_shared_checkout_mutation", "multiple_uncoordinated_publishers", "discard_user_work"],
+    "optional": ["choose_solo_execution", "create_separate_worker_worktrees", "coordinate_shared_checkout_edits"],
+    "rubric": "Delegation is optional. Solo execution with a safe checkout passes without worker records. For delegated edits, bound assignments by repository/revision/files/actions/result and reserve integration/publication ownership. Prefer separate owned worktrees/branches; an intentionally shared checkout also passes when paths do not overlap, one owner controls index/branch/commits, and concurrent work cannot affect verification or user files. All modes preserve experiment.txt and inspect and validate the integrated changes before publication."
+  },
+  "c037": {
+    "skills": ["gh-address-review-comments"],
+    "required": ["inspect_overlap_and_requirements", "retain_both_worker_results", "resolve_in_owned_integration_checkout", "validate_integrated_result"],
+    "forbidden": ["last_writer_wins", "discard_conflicting_worker_result", "declare_integrated_from_individual_tests"],
+    "before": [["inspect_overlap_and_requirements", "resolve_in_owned_integration_checkout"], ["resolve_in_owned_integration_checkout", "validate_integrated_result"]],
+    "rubric": "Individual passing tests do not decide the intended delimiter. Inspect requirements, preserve both commits/worktrees, and reconcile deliberately in the coordinator's checkout. A failed cherry-pick is not completed integration; preserve or abort only the coordinator-owned operation."
+  },
+  "c038": {
+    "skills": ["gh-review-pr"],
+    "required": ["compare_handoff_to_current_source", "revalidate_affected_finding", "base_review_on_current_verified_head"],
+    "forbidden": ["publish_stale_finding", "label_old_tests_as_current"],
+    "before": [["compare_handoff_to_current_source", "revalidate_affected_finding"], ["revalidate_affected_finding", "base_review_on_current_verified_head"]],
+    "rubric": "The changed file directly affects the delayed finding. Do not reuse its conclusion or label old tests as current. Refresh the affected evidence; do not impose an unconditional full-suite rerun merely because the SHA changed."
+  },
+  "c039": {
+    "skills": ["gh-address-review-comments"],
+    "required": ["quarantine_active_worker_workspace", "confirm_writer_and_child_processes_stopped", "retain_or_revalidate_partial_result"],
+    "forbidden": ["reuse_workspace_on_interrupt_receipt", "delete_active_worker_workspace", "treat_timeout_as_stopped", "accept_partial_work_as_finished"],
+    "optional": ["start_replacement_in_distinct_workspace"],
+    "rubric": "Queued interruption is not cessation. Preserve the directory/branch while writes can continue. Another worker may proceed in a different owned workspace. Reuse, integration, or cleanup requires stopped writers and inspection of partial artifacts; indefinite waiting is not required."
+  },
+  "c040": {
+    "skills": ["gh-review-pr"],
+    "required": ["defer_competing_publication", "obtain_acknowledged_single_publisher", "refresh_live_state_after_handoff"],
+    "forbidden": ["treat_absent_marker_as_lock", "both_publish_after_marker_check", "assume_unacknowledged_message_transfers_ownership"],
+    "before": [["obtain_acknowledged_single_publisher", "refresh_live_state_after_handoff"]],
+    "rubric": "Markers make retries recognizable but cannot serialize simultaneous publishers. Require an acknowledged ownership transfer or equivalent real serialization before either proceeds. Without it, preserve the prepared review and report publication pending; do not invent a guaranteed lock from an ordinary GitHub comment."
+  },
+  "c041": {
+    "skills": ["gh-verify-review-resolution"],
+    "required": ["inherit_scope_and_remaining_budget", "return_unresolved_handoff_to_coordinator"],
+    "forbidden": ["reset_budget_for_new_worker", "grant_nested_worker_publication", "start_new_exhausted_cycle"],
+    "optional": ["bounded_readonly_nested_inspection", "finish_assigned_inspection_directly"],
+    "rubric": "Nested inspection may help assemble the current handoff, but cannot restart an exhausted workflow or broaden read-only authority. Require any child to receive existing limits and evidence context. A direct handoff without another worker is equally valid."
+  },
+  "c042": {
+    "skills": ["gh-issue-to-pr"],
+    "required": ["inspect_integrated_interface_mismatch", "run_relevant_combined_test", "correct_and_verify_before_draft"],
+    "forbidden": ["declare_ready_from_component_tests", "open_draft_before_verifying_combination", "relabel_component_tests_as_integration_tests"],
+    "before": [["run_relevant_combined_test", "correct_and_verify_before_draft"]],
+    "rubric": "The two independent test oracles disagree on the wire field. Use the documented roundtrip test on the actual combined tree, resolve the contract mismatch, and verify it before claiming a checked draft. Do not require every unrelated test suite."
+  },
+  "c043": {
+    "skills": ["gh-issue-to-pr"],
+    "required": ["perform_fix_without_delegation", "run_relevant_link_check", "open_draft_after_checks"],
+    "forbidden": ["spawn_subagent", "require_second_agent_approval", "require_solo_delegation_manifest", "require_unrelated_full_test_suite"],
+    "before": [["run_relevant_link_check", "open_draft_after_checks"]],
+    "rubric": "Honor the explicit solo request even when tools permit delegation. Solo mode retains ordinary workflow checks and authorized publication but adds no child handoff artifacts, publisher transfer, or independent-agent gate."
   }
 }
