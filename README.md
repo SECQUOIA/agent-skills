@@ -1,89 +1,168 @@
 # SECQUOIA Agent Skills
 
-Shared agent skills for the SECQUOIA group, usable in **both** Claude Code and the Codex CLI. Each skill is a self-contained folder under [`skills/`](skills/) with a `SKILL.md` (read by both tools) and an `agents/openai.yaml` sidecar (used by Codex, ignored by Claude).
+Shared workflow skills for Codex and Claude Code. Each folder in [`skills/`](skills/)
+contains a `SKILL.md`; Codex also uses its `agents/openai.yaml` sidecar. This repository
+is the source of truth, with changes reviewed through pull requests.
 
-This repository is the **single source of truth**. It is private and curated by one reviewer through pull requests — see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## What's included
+## Included workflows
 
 | Skill | Purpose |
 |-------|---------|
-| `gh-triage-issue` | Reproduce a claimed bug and post a failing test + acceptance criteria on the issue (no fix) |
-| `gh-issue-to-pr` | Turn a GitHub issue into a focused implementation PR |
-| `gh-review-pr` | Post a maintainer review verdict on a PR (uses `references/review-rubric.md`) |
-| `gh-address-review-comments` | Implement fixes for review feedback and reply in-thread |
-| `gh-verify-review-resolution` | Check whether review comments were addressed (read-only unless asked to post the outcome review) |
-| `gh-merge-pr` | Merge a PR after verifying it is ready |
-| `gh-julia-release` | Publish a Julia package release through the registry |
-| `gh-pages-deployment` | Investigate/manage GitHub Pages and other hosted documentation deployments |
-| `gh-workflow-conventions` | Shared conventions the `gh-*` skills reference (not run directly) |
-| `explain-pr-to-me` | Explain a PR technically and in plain language without posting or changing state |
-| `apply-conversation-lessons` | Fold lessons from a session back into the skills (on your `learnings/<user>` branch) |
-| `submit-learnings` | Rebase, push your learnings branch, and open a PR for the reviewer |
-| `sync-secquoia-skills` | After the weekly merge, pull merged `main` into your local clone and refresh installed skill links |
+| `gh-triage-issue` | Reproduce a bug and publish evidence and acceptance criteria |
+| `gh-issue-to-pr` | Implement an issue and open a focused draft PR |
+| `gh-review-pr` | Post a maintainer review verdict |
+| `gh-address-review-comments` | Implement requested fixes and reply to review feedback |
+| `gh-verify-review-resolution` | Verify existing feedback; publish only when requested |
+| `gh-merge-pr` | Verify readiness and merge a PR |
+| `gh-julia-release` | Publish through Julia General or a documented URL-only release workflow |
+| `gh-pages-deployment` | Investigate Pages or other documentation hosting; change configuration when requested |
+| `gh-workflow-conventions` | Shared GitHub policy and reference routing |
+| `explain-pr-to-me` | Explain a PR without publishing or editing project files |
+| `apply-conversation-lessons` | Make requested, evidence-backed improvements to existing skills |
+| `submit-learnings` | Safely sync and submit a personal learnings branch |
+| `sync-secquoia-skills` | Sync merged skills while preserving pending local learnings |
 
-These skills chain into one issue → PR → merge pipeline — see [PIPELINE.md](PIPELINE.md).
+See [the issue-to-release pipeline](PIPELINE.md), [contribution workflow](CONTRIBUTING.md),
+and [behavioral evaluation guide](evals/README.md). Install the whole set: sibling
+references connect these workflows and break if individual folders are installed alone.
 
-> **The skills reference each other by relative sibling paths** (e.g. every `gh-*`
-> skill reads `../gh-workflow-conventions/`). They must be installed **together**;
-> installing one folder in isolation will break those references.
+## Installation and discovery
 
-## Install
-
-Requires `bash` and git. Works on macOS/Linux/WSL.
+The installer requires Bash, Git, and Python 3.10 or newer. Use it from a POSIX shell
+on Linux, macOS, or WSL:
 
 ```bash
 git clone https://github.com/SECQUOIA/agent-skills.git ~/secquoia-agent-skills
 cd ~/secquoia-agent-skills
-./install.sh          # symlinks every skill into ~/.codex/skills and ~/.claude/skills
+./install.sh
 ```
 
-Start a fresh Codex or Claude session and the skills appear (e.g. `/gh-review-pr`, or trigger by description).
+A fresh default installation links skills into `~/.agents/skills` for Codex and
+`~/.claude/skills` for Claude Code. Start a fresh client session to pick them up.
+Existing legacy installations remain supported; the installer selects the Codex
+root in this order:
 
-- **Windows without symlink support:** `./install.sh --copy` (then re-run after each `git pull`).
-- **Custom Codex home:** set `CODEX_HOME` before running.
+1. An explicit `--codex-skills-dir /path/to/skills`.
+2. The single populated root among `~/.agents/skills` and the selected Codex home's
+   `skills` directory, preserving an existing installation.
+3. A custom Codex home's `skills` directory when `--codex-home` or `CODEX_HOME`
+   selects a nondefault home.
+4. `~/.agents/skills` for a fresh default installation.
 
-### Optional deterministic hooks
-
-Install the shared encounter guard in audit mode for Codex, Claude Code, or both:
+Codex configuration and hooks stay in `CODEX_HOME` (default `~/.codex`), independently
+of skill discovery. `--codex-home` overrides that setting. `--user-home /path` supplies
+an isolated user root, including default config locations, without changing `HOME`.
 
 ```bash
-./install.sh --codex-hooks
-./install.sh --claude-hooks
+./install.sh --copy                         # copy instead of symlinking
+./install.sh --codex-skills-dir /path/to/skills
+./install.sh --codex-home /path/to/codex-config
 ```
 
-The Codex installer merges five owned handlers into `~/.codex/hooks.json`: Bash pre-use and post-use handlers plus prompt, stop, and session-start boundaries. The Claude installer merges nine handlers into the `hooks` key of `~/.claude/settings.json`: Bash pre-use, success, and failure handlers plus prompt, root-stop, subagent-stop, stop-failure, session-start, and session-end boundaries. Neither installer replaces unrelated hooks or settings, both back up the previous file before changing it, and rerunning either is a no-op. In Codex, open `/hooks` once to review and trust a newly installed or changed definition; Claude Code snapshots hooks at session start, so restart open sessions after installation. Audit mode reports and counts violations but does not block tool calls or prevent a turn from ending. After reviewing the audit results, opt into enforcement with `./install.sh --codex-hooks=enforce` or `./install.sh --claude-hooks=enforce`. Enforcement denies unauthorized writes and blocks a stop at most once per attempt: the `stop_hook_active` re-entry downgrades to a recorded escape with an advisory, so an agent that cannot perform the readback is never looped. `./uninstall.sh` removes the owned handlers from both files.
+The installer checks both clients' destinations before replacing any skill. It
+refuses foreign entries and duplicate Codex discovery roots. Inspect unmarked legacy
+copies before moving them outside discovery; they are not automatically adopted.
+To move an owned installation to another root, uninstall the old set before installing
+at the new root. Preserve custom root flags when updating or uninstalling.
 
-The guard currently checks two existing `gh-workflow-conventions` invariants for confidently recognized `gh` CLI writes: use a separate successful live-state read before a GitHub write, and perform an exact-target readback afterward. Failed, interrupted, missing-result, or otherwise ambiguous recognized writes remain pending until that readback occurs; lifecycle boundaries record an unverified write and clear stale per-turn authorization. Only a direct, successful read with explicit literal scope can authorize a write or clear its readback. For `gh pr create` and `gh issue create`, an explicit collection read supplies the preflight; after success, a single matching URL is read transiently from the tool result to re-key the pending obligation to the new number. Missing, ambiguous, or mismatched result URLs remain pending, and response text is never persisted. Literal PR, issue, run, release, workflow, REST, and node-identified GraphQL targets are isolated, as are Claude parent and subagent executions. Opaque input, generated commands, and unknown operations earn no authorization and are not counted as observed writes. This is a workflow guard, not a security sandbox—arbitrary HTTP clients, shell programs, and launchers outside its recognized wrapper grammars (for example `find -exec` or `parallel`) remain outside its command classifier.
+Owned copies have a source marker. Copies differing from the source are backed up
+outside the discovery directory before replacement or removal. Foreign files,
+foreign symlinks, and unmarked copies are preserved. The repository's pre-push guard
+is installed when no different hook already exists.
 
-Encounters are deduplicated by rule and workflow target over 24 hours, so retries and an agent switch on the same task count once. The local SQLite ledger contains rule IDs, workflow labels, agent names, outcomes, timestamps, and skill revisions. Transient hook state uses hashed session, turn, tool-use, and subagent identifiers and is pruned after 30 days; prompts, transcripts, command bodies, and raw lifecycle identifiers are never stored. The database defaults to `~/.local/state/secquoia-agent-skills/encounters.sqlite3` (or `$XDG_STATE_HOME/secquoia-agent-skills/encounters.sqlite3`).
+When a source skill is removed, install and uninstall recognize only its exact
+owned link or source marker. They remove owned dangling links and back up every
+retired owned copy outside discovery; a missing source cannot establish whether
+the copy contains local edits. Entries belonging to another clone remain untouched.
+Installation checks current-source conflicts before pruning retired entries.
 
-Inspect candidates that reached the default recurrence threshold:
+## Optional encounter hooks
+
+Hooks are a per-machine opt-in, separate from installing skills:
 
 ```bash
-python ~/.codex/skills/apply-conversation-lessons/scripts/encounter_ledger.py report
+./install.sh --codex-hooks                  # audit mode
+./install.sh --claude-hooks                 # audit mode
+./install.sh --codex-hooks=enforce          # optional enforcement
+./install.sh --claude-hooks=enforce
 ```
 
-The runner is agent-neutral: both installers point their handlers at the same installed script (`hook --agent codex|claude --mode audit`) and both agents write to the same local ledger, so retries and agent switches on one task dedupe into a single episode.
+Codex handlers live in the selected Codex home's `hooks.json`; Claude handlers live
+in `~/.claude/settings.json`. Installation preserves unrelated hooks and settings,
+backs up changed files, and is repeatable with the same arguments. In Codex, review
+and trust the definition through `/hooks`; restart client sessions as needed.
+Generated commands retain the Python interpreter used during installation, with
+interpreter and script paths quoted so spaces remain valid.
 
-Hooks are a per-machine opt-in. Pulling merged skills (`git pull` or `sync-secquoia-skills`) never installs, changes, or removes hooks; each user decides separately whether to run the hook installers on their machine. The merged handler configuration, its timestamped backups, and the encounter ledger live outside this repository and are never committed or included in a learnings PR — only the runner script, installers, and tests are shared.
+The guard checks two rules for recognized `gh` operations: a separate successful
+live-state read before a write, and a matching readback afterward. Audit mode records
+and reports missing checks. Enforcement denies recognized writes lacking an eligible
+preflight and blocks a stop at most once per attempt. A failed or ambiguous write
+remains pending until readback; a lifecycle boundary records outstanding work.
 
-## Update
+Only a successful read with explicit literal scope supplies evidence. For creation,
+a scoped collection read supplies the preflight and an unambiguous result URL can
+identify the new issue or PR. Response text is inspected transiently. The classifier
+does not cover arbitrary HTTP clients, generated commands, or every shell wrapper;
+its flags are workflow observations, not a security boundary or model failure rate.
+
+## Encounter evidence and model comparisons
+
+The SQLite ledger defaults to
+`~/.local/state/secquoia-agent-skills/encounters.sqlite3`, or the corresponding
+`$XDG_STATE_HOME/secquoia-agent-skills/` directory. Rule-and-target episodes deduplicate
+retries and agent/model switches over a rolling 24-hour window. Each newly recorded
+observation retains its own outcome, skill revision, event, and agent.
+
+Optional runtime labels are `model`, `reasoning_effort`, `client_version`, and
+`harness_version`. Hooks accept explicit top-level labels, including `model_slug`;
+missing or invalid labels stay null. A manual `record` command also accepts
+`--model`, `--reasoning-effort`, `--client-version`, and `--harness-version`. Supply
+observed labels only; do not infer them from a default configuration.
+
+From the repository:
 
 ```bash
-cd ~/secquoia-agent-skills && git pull
+python3 skills/apply-conversation-lessons/scripts/encounter_ledger.py report --json
 ```
 
-Because `install.sh` symlinks, a `git pull` updates both tools at once (no reinstall needed unless you used `--copy`). This includes installed hook behavior: the handlers execute the shared runner fresh on every event through the same path, so a pull changes what already-installed hooks do without touching `~/.codex/hooks.json` or `~/.claude/settings.json` — no reinstall, session restart, or Codex re-trust required. With `--copy`, re-run `./install.sh` (plus your hook flag) after each pull to refresh the copied runner.
+Reports retain episode totals and add `runtime_observations` grouped by recorded
+context. Cohorts can share episodes, and a boundary event's model is the observer,
+not necessarily the writer. Legacy attempts have no reconstructed attribution or
+per-attempt outcome; they appear as `unattributed_legacy_observations`. Reports include
+all observations belonging to episodes active in the selected window.
 
-## Uninstall
+Hooks do not persist prompts, transcripts, command bodies, or raw lifecycle IDs.
+Transient identifiers are hashed and pruned after 30 days. Runtime parsing accepts
+bounded identifier labels, ignoring nested metadata and tool output. Keep manual
+workflow labels and `--detail` limited to abstract task information. Local ledgers,
+hook configuration, and their backups must not enter shared commits.
+
+See [evidence guidance](skills/apply-conversation-lessons/references/evidence.md)
+for interpreting classifier flags, and [evaluations](evals/README.md) for controlled
+comparisons. Passing script tests or shortening instructions does not establish
+better model behavior.
+
+## Updating and removing
+
+Use `sync-secquoia-skills` to update the managed clone and refresh installed skills.
+Its [safe synchronization procedure](skills/sync-secquoia-skills/references/branch-sync.md)
+protects committed learnings before replay and requires a clean working tree.
+Symlinks follow source changes; rerun `./install.sh` when skills are added or removed.
+Copied installations require `./install.sh --copy` after source changes. Keep the
+same root flags; the installer reconciles added and retired owned entries.
+Start a fresh session if the client has not refreshed its skill catalog.
+
+Updating a symlinked hook runner also updates the implementation used by existing
+handlers. Sync does not change hook configuration or opt anyone into hooks. Review
+configuration changes separately rather than assuming every client reloads them.
 
 ```bash
-cd ~/secquoia-agent-skills && ./uninstall.sh
+./uninstall.sh                             # preserve foreign entries and changed copies
+./uninstall.sh --codex-skills-dir /path/to/skills
 ```
 
-## Contributing improvements
-
-Do **not** edit skills on `main` on your machine. Work on a personal branch, let
-`apply-conversation-lessons` accumulate improvements, and push a PR for review on
-the group cadence. Full workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
+Uninstall removes this checkout's owned skill entries and hook handlers associated
+with its source or currently owned installed scripts. It preserves hooks belonging
+to another checkout and retains the local encounter history. See
+[CONTRIBUTING.md](CONTRIBUTING.md) before changing shared skills.

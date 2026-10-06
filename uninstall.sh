@@ -1,30 +1,5 @@
 #!/usr/bin/env bash
-# Remove the SECQUOIA agent skills from Codex CLI and Claude Code.
-# Only removes entries that point at (or were copied from) this repo's skills.
+# Manage the complete skill set; --help documents roots and hook options.
 set -euo pipefail
-
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC="$REPO_DIR/skills"
-CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
-TARGETS=("$CODEX_HOME/skills" "$HOME/.claude/skills")
-
-ENCOUNTER_SCRIPT="$SRC/apply-conversation-lessons/scripts/encounter_ledger.py"
-if [ -f "$ENCOUNTER_SCRIPT" ]; then
-  python3 "$ENCOUNTER_SCRIPT" uninstall-codex-hooks --codex-home "$CODEX_HOME"
-  python3 "$ENCOUNTER_SCRIPT" uninstall-claude-hooks --settings-path "$HOME/.claude/settings.json"
-fi
-
-for T in "${TARGETS[@]}"; do
-  [ -d "$T" ] || continue
-  echo "Removing from $T:"
-  for S in "$SRC"/*/; do
-    name="$(basename "$S")"
-    dest="$T/$name"
-    if [ -L "$dest" ]; then
-      rm "$dest"; echo "  - $name (symlink)"
-    elif [ -d "$dest" ]; then
-      rm -rf "$dest"; echo "  - $name (copy)"
-    fi
-  done
-done
-echo "Done."
+exec python3 "$REPO_DIR/scripts/manage_installation.py" uninstall "$@"

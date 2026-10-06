@@ -2,8 +2,10 @@
 """Shared encounter ledger and lifecycle-hook adapter for SECQUOIA skills.
 
 Encounter history stores rule identifiers, workflow labels, agent names, outcomes,
-and skill revisions. Transient hook state uses hashed lifecycle identifiers. The
-runner never reads or persists prompts or transcripts.
+skill revisions, and optional runtime labels. Runtime labels describe each observed
+event, not which model caused a whole deduplicated episode. Transient hook state
+uses hashed lifecycle identifiers. The runner never reads or persists prompts or
+transcripts.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ DEFAULT_MIN_ENCOUNTERS = 3
 HOOK_STATE_RETENTION_DAYS = 30
 MAX_NESTED_SHELL_DEPTH = 32
 MAX_TOOL_RESPONSE_SCAN_CHARS = 32_000
+RUNTIME_FIELDS = ("model", "reasoning_effort", "client_version", "harness_version")
 OUTCOME_RANK = {"passed": 0, "prevented": 1, "escaped": 2}
 
 RULES = {
@@ -394,6 +397,24 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
         CREATE INDEX IF NOT EXISTS encounters_lookup
             ON encounters(rule_id, workflow_key, last_seen);
 
+        -- Existing encounters remain intact. Their historical attempts cannot
+        -- be reconstructed as model-specific observations and are not backfilled.
+        CREATE TABLE IF NOT EXISTS encounter_observations (
+            id INTEGER PRIMARY KEY,
+            encounter_id INTEGER NOT NULL REFERENCES encounters(id),
+            observed_at TEXT NOT NULL,
+            agent TEXT NOT NULL,
+            model TEXT,
+            reasoning_effort TEXT,
+            client_version TEXT,
+            harness_version TEXT,
+            event TEXT NOT NULL,
+            skill_revision TEXT NOT NULL,
+            outcome TEXT NOT NULL CHECK (outcome IN ('passed', 'prevented', 'escaped'))
+        );
+        CREATE INDEX IF NOT EXISTS observations_encounter
+            ON encounter_observations(encounter_id);
+
         CREATE TABLE IF NOT EXISTS hook_activity (
             session_id TEXT NOT NULL,
             turn_id TEXT NOT NULL,
@@ -579,6 +600,47 @@ def _workflow_hash(label: str) -> str:
     return hashlib.sha256(label.encode("utf-8")).hexdigest()[:24]
 
 
+def _runtime_label(value: Any) -> str | None:
+    """Accept bounded identifier labels, never arbitrary payload text or objects."""
+    if not isinstance(value, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}", value
+    ):
+        return None
+    if value.lower() in {"unknown", "unspecified", "null"} or value.lower().startswith(
+        ("sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_")
+    ):
+        return None
+    return value
+
+
+def _payload_runtime(payload: dict[str, Any]) -> dict[str, str | None]:
+    """Read only explicit top-level labels; do not infer from config or transcript."""
+    values = {field: _runtime_label(payload.get(field)) for field in RUNTIME_FIELDS}
+    # Some hook clients expose the model under model_slug. Never traverse nested
+    # metadata or tool responses, which may contain prompt text and credentials.
+    if values["model"] is None:
+        values["model"] = _runtime_label(payload.get("model_slug"))
+    event = payload.get("hook_event_name")
+    values["event"] = (
+        event
+        if isinstance(event, str)
+        and event
+        in {
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "Stop",
+            "SubagentStop",
+            "StopFailure",
+            "SessionEnd",
+        }
+        else "unknown"
+    )
+    return values
+
+
 def record_encounter(
     connection: sqlite3.Connection,
     *,
@@ -589,6 +651,11 @@ def record_encounter(
     outcome: str,
     revision: str,
     detail: str = "",
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+    client_version: str | None = None,
+    harness_version: str | None = None,
+    event: str | None = "manual",
     now: datetime | None = None,
     dedupe_hours: int = DEFAULT_DEDUPE_HOURS,
 ) -> int:
@@ -633,31 +700,99 @@ def record_encounter(
                     detail,
                 ),
             )
-            return int(cursor.lastrowid)
-
-        agents = set(json.loads(row["agents_json"]))
-        agents.add(agent)
-        strongest = max((row["outcome"], outcome), key=OUTCOME_RANK.__getitem__)
+            identifier = int(cursor.lastrowid)
+        else:
+            identifier = int(row["id"])
+            agents = set(json.loads(row["agents_json"]))
+            agents.add(agent)
+            strongest = max((row["outcome"], outcome), key=OUTCOME_RANK.__getitem__)
+            connection.execute(
+                """
+                UPDATE encounters
+                SET last_seen = ?, last_agent = ?, agents_json = ?,
+                    last_skill_revision = ?, outcome = ?, attempts = attempts + 1,
+                    detail = CASE WHEN ? = '' THEN detail ELSE ? END
+                WHERE id = ?
+                """,
+                (
+                    current_text,
+                    agent,
+                    json.dumps(sorted(agents)),
+                    revision,
+                    strongest,
+                    detail,
+                    detail,
+                    row["id"],
+                ),
+            )
         connection.execute(
             """
-            UPDATE encounters
-            SET last_seen = ?, last_agent = ?, agents_json = ?,
-                last_skill_revision = ?, outcome = ?, attempts = attempts + 1,
-                detail = CASE WHEN ? = '' THEN detail ELSE ? END
-            WHERE id = ?
+            INSERT INTO encounter_observations (
+                encounter_id, observed_at, agent, model, reasoning_effort,
+                client_version, harness_version, event, skill_revision, outcome
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                identifier,
                 current_text,
                 agent,
-                json.dumps(sorted(agents)),
+                _runtime_label(model),
+                _runtime_label(reasoning_effort),
+                _runtime_label(client_version),
+                _runtime_label(harness_version),
+                _runtime_label(event) or "unknown",
                 revision,
-                strongest,
-                detail,
-                detail,
-                row["id"],
+                outcome,
             ),
         )
-        return int(row["id"])
+        return identifier
+
+
+def _runtime_report(
+    connection: sqlite3.Connection, rule_id: str, cutoff: str
+) -> dict[str, Any]:
+    """Report event cohorts, preserving uncertainty for legacy/mixed-version rows."""
+    attempts = connection.execute(
+        "SELECT COALESCE(SUM(attempts), 0) FROM encounters WHERE rule_id = ? AND last_seen >= ?",
+        (rule_id, cutoff),
+    ).fetchone()[0]
+    exists = connection.execute(
+        "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'encounter_observations'"
+    ).fetchone()
+    cohorts = []
+    if exists:
+        cohorts = [
+            dict(row)
+            for row in connection.execute(
+                """
+            SELECT o.agent, o.model, o.reasoning_effort, o.client_version,
+                   o.harness_version, o.event, o.skill_revision,
+                   COUNT(*) AS observations, COUNT(DISTINCT e.id) AS episodes_touched,
+                   SUM(o.outcome = 'passed') AS passed,
+                   SUM(o.outcome = 'prevented') AS prevented,
+                   SUM(o.outcome = 'escaped') AS escaped
+            FROM encounter_observations o JOIN encounters e ON e.id = o.encounter_id
+            WHERE e.rule_id = ? AND e.last_seen >= ?
+            GROUP BY o.agent, o.model, o.reasoning_effort, o.client_version,
+                     o.harness_version, o.event, o.skill_revision
+            ORDER BY o.agent, o.model, o.reasoning_effort, o.client_version,
+                     o.harness_version, o.event, o.skill_revision
+            """,
+                (rule_id, cutoff),
+            ).fetchall()
+        ]
+    recorded = sum(row["observations"] for row in cohorts)
+    return {
+        "runtime_observations": cohorts,
+        "recorded_observations": recorded,
+        "unattributed_legacy_observations": max(0, attempts - recorded),
+        "attribution_note": (
+            "Runtime labels describe observed events, not causal model attribution. "
+            "Cohorts can share episodes; counts include all observations of episodes "
+            "active in the report window. Historical attempts without observation "
+            "rows have unknown runtime and per-attempt outcome."
+        ),
+    }
 
 
 def report_encounters(
@@ -718,6 +853,7 @@ def report_encounters(
                 "revisions": sorted(filter(None, (row["revisions"] or "").split(","))),
                 "first_seen": row["first_seen"],
                 "last_seen": row["last_seen"],
+                **_runtime_report(connection, row["rule_id"], cutoff),
             }
         )
     return result
@@ -2079,9 +2215,7 @@ def _segments_containing_gh(
                             working_directory=None,
                         )
                     else:
-                        current = replace(
-                            current, working_directory=cd_directory
-                        )
+                        current = replace(current, working_directory=cd_directory)
             segment = []
         else:
             segment.append(token)
@@ -2685,7 +2819,9 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
                     and not _dynamic_shell_value(hostname)
                 ),
                 created_comment_kind=(
-                    _created_comment_kind(tokens, group, action) if kind == "write" else ""
+                    _created_comment_kind(tokens, group, action)
+                    if kind == "write"
+                    else ""
                 ),
             )
         )
@@ -3333,6 +3469,7 @@ def _pre_tool_use(
                 outcome=outcome,
                 revision=revision,
                 detail="GitHub write attempted without a separate successful live-state read.",
+                **_payload_runtime(payload),
             )
         if not denied:
             violation_keys = {operation.workflow_key for operation in violations}
@@ -3347,6 +3484,7 @@ def _pre_tool_use(
                         outcome="passed",
                         revision=revision,
                         detail="Separate live-state read observed before the write attempt.",
+                        **_payload_runtime(payload),
                     )
                 if _creation_group(operation) is not None:
                     _increment_create_attempt(
@@ -3532,6 +3670,7 @@ def _post_tool_use(
                     outcome="passed",
                     revision=revision,
                     detail="Separate post-write readback observed.",
+                    **_payload_runtime(payload),
                 )
 
         for write in writes:
@@ -3582,6 +3721,7 @@ def _finalize_session_activity(
     clear_tools: bool,
     clear_session: bool = False,
     revision: str | None = None,
+    runtime: dict[str, str | None] | None = None,
 ) -> list[str]:
     current_revision = revision or skill_revision()
     with _write_transaction(connection):
@@ -3604,6 +3744,7 @@ def _finalize_session_activity(
                 outcome="escaped",
                 revision=current_revision,
                 detail=detail,
+                **(runtime or {}),
             )
         connection.execute(
             "DELETE FROM hook_activity WHERE session_id = ?", (session_id,)
@@ -3665,6 +3806,7 @@ def _stop(
                 outcome=outcome,
                 revision=revision,
                 detail="Turn stopped with an unverified GitHub write.",
+                **_payload_runtime(payload),
             )
         if not should_block:
             if agent == "codex":
@@ -3705,6 +3847,7 @@ def _user_prompt_submit(
             ),
             clear_tools=False,
             revision=revision,
+            runtime=_payload_runtime(payload),
         )
     if not labels:
         return None
@@ -3737,6 +3880,7 @@ def _session_start(
         detail="A session boundary was reached with an unverified GitHub write.",
         clear_tools=True,
         clear_session=True,
+        runtime=_payload_runtime(payload),
     )
     if not labels:
         return None
@@ -3768,6 +3912,7 @@ def _finalize_nonblocking_boundary(
         detail=detail,
         clear_tools=True,
         clear_session=clear_session,
+        runtime=_payload_runtime(payload),
     )
 
 
@@ -3835,7 +3980,26 @@ def _owned_handler(handler: Any) -> bool:
     )
 
 
-def _remove_owned_hooks(document: dict[str, Any]) -> bool:
+def _remove_owned_hooks(
+    document: dict[str, Any], scripts: Iterable[Path] | None = None
+) -> bool:
+    allowed = {str(path.resolve()) for path in scripts} if scripts is not None else None
+
+    def removable(handler: Any) -> bool:
+        if not _owned_handler(handler):
+            return False
+        if allowed is None:
+            return True
+        try:
+            command = shlex.split(handler["command"])
+        except (TypeError, ValueError):
+            return False
+        return (
+            len(command) > 2
+            and command[2] == "hook"
+            and str(Path(command[1]).resolve()) in allowed
+        )
+
     changed = False
     hooks = document.get("hooks")
     if not isinstance(hooks, dict):
@@ -3849,9 +4013,7 @@ def _remove_owned_hooks(document: dict[str, Any]) -> bool:
             if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
                 kept_groups.append(group)
                 continue
-            handlers = [
-                handler for handler in group["hooks"] if not _owned_handler(handler)
-            ]
+            handlers = [handler for handler in group["hooks"] if not removable(handler)]
             if len(handlers) != len(group["hooks"]):
                 changed = True
             if handlers:
@@ -3920,7 +4082,7 @@ def install_codex_hooks(
     document = _load_hooks(hooks_path)
     _remove_owned_hooks(document)
     command = (
-        f"/usr/bin/python3 {shlex.quote(str(script))} hook --agent codex "
+        f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} hook --agent codex "
         f"--mode {mode} --installation-id {INSTALLATION_ID}"
     )
     handler = {
@@ -3958,7 +4120,7 @@ def install_claude_hooks(
     document = _load_hook_document(settings_path, {"hooks": {}})
     _remove_owned_hooks(document)
     command = (
-        f"/usr/bin/python3 {shlex.quote(str(script))} hook --agent claude "
+        f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} hook --agent claude "
         f"--mode {mode} --installation-id {INSTALLATION_ID}"
     )
     handler = {"type": "command", "command": command, "timeout": 5}
@@ -3986,11 +4148,13 @@ def install_claude_hooks(
     return settings_path, backup
 
 
-def uninstall_claude_hooks(settings_path: Path) -> tuple[Path, Path | None, bool]:
+def uninstall_claude_hooks(
+    settings_path: Path, scripts: Iterable[Path] | None = None
+) -> tuple[Path, Path | None, bool]:
     if not settings_path.exists():
         return settings_path, None, False
     document = _load_hook_document(settings_path, {"hooks": {}})
-    changed = _remove_owned_hooks(document)
+    changed = _remove_owned_hooks(document, scripts)
     if not changed:
         return settings_path, None, False
     if document.get("hooks") == {}:
@@ -4000,12 +4164,14 @@ def uninstall_claude_hooks(settings_path: Path) -> tuple[Path, Path | None, bool
     return settings_path, backup, True
 
 
-def uninstall_codex_hooks(codex_home: Path) -> tuple[Path, Path | None, bool]:
+def uninstall_codex_hooks(
+    codex_home: Path, scripts: Iterable[Path] | None = None
+) -> tuple[Path, Path | None, bool]:
     hooks_path = codex_home / "hooks.json"
     if not hooks_path.exists():
         return hooks_path, None, False
     document = _load_hooks(hooks_path)
-    changed = _remove_owned_hooks(document)
+    changed = _remove_owned_hooks(document, scripts)
     if not changed:
         return hooks_path, None, False
     backup = _backup_if_present(hooks_path)
@@ -4026,6 +4192,7 @@ def _command_record(args: argparse.Namespace) -> int:
             revision=args.skill_revision or skill_revision(),
             detail=args.detail,
             dedupe_hours=args.dedupe_hours,
+            **{field: getattr(args, field, None) for field in RUNTIME_FIELDS},
         )
     finally:
         connection.close()
@@ -4058,6 +4225,21 @@ def _command_report(args: argparse.Namespace) -> int:
             f"across {row['distinct_targets']} targets / {row['opportunities']} opportunities "
             f"({row['prevented']} prevented, {row['escaped']} escaped); "
             f"agents={','.join(row['agents'])}; {row['description']}"
+        )
+        for cohort in row["runtime_observations"]:
+            labels = ", ".join(
+                f"{field}={cohort[field] or 'unknown'}" for field in RUNTIME_FIELDS
+            )
+            print(
+                f"  Observed events: agent={cohort['agent']}, {labels}, "
+                f"event={cohort['event']}, revision={cohort['skill_revision']}; "
+                f"{cohort['observations']} observations "
+                f"({cohort['passed']} passed, {cohort['prevented']} prevented, "
+                f"{cohort['escaped']} escaped)."
+            )
+        print(
+            f"  Legacy observations with unknown runtime/outcome: "
+            f"{row['unattributed_legacy_observations']}. {row['attribution_note']}"
         )
     return 0
 
@@ -4095,6 +4277,11 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--agent", required=True)
     record.add_argument("--outcome", required=True, choices=sorted(OUTCOME_RANK))
     record.add_argument("--skill-revision")
+    for field in RUNTIME_FIELDS:
+        record.add_argument(
+            "--" + field.replace("_", "-"),
+            help="optional observed runtime label; omit when unknown",
+        )
     record.add_argument("--detail", default="")
     record.add_argument("--dedupe-hours", type=int, default=DEFAULT_DEDUPE_HOURS)
     record.add_argument("--state-dir")
@@ -4141,9 +4328,15 @@ def build_parser() -> argparse.ArgumentParser:
         "uninstall-codex-hooks", help="remove owned Codex handlers"
     )
     uninstall.add_argument("--codex-home", type=Path, required=True)
+    uninstall.add_argument(
+        "--script",
+        type=Path,
+        action="append",
+        help="remove only hooks for this script (repeatable)",
+    )
 
     def command_uninstall(args: argparse.Namespace) -> int:
-        path, backup, changed = uninstall_codex_hooks(args.codex_home)
+        path, backup, changed = uninstall_codex_hooks(args.codex_home, args.script)
         if changed:
             print(f"Removed Codex encounter hooks from {path}; backup: {backup}.")
         else:
@@ -4181,9 +4374,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path.home() / ".claude" / "settings.json",
     )
+    claude_uninstall.add_argument(
+        "--script",
+        type=Path,
+        action="append",
+        help="remove only hooks for this script (repeatable)",
+    )
 
     def command_uninstall_claude(args: argparse.Namespace) -> int:
-        path, backup, changed = uninstall_claude_hooks(args.settings_path)
+        path, backup, changed = uninstall_claude_hooks(args.settings_path, args.script)
         if changed:
             print(f"Removed Claude encounter hooks from {path}; backup: {backup}.")
         else:
