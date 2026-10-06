@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["selected_skill", "actions", "rationale"],
+  "properties": {
+    "selected_skill": {"type": ["string", "null"]},
+    "actions": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "rationale": {"type": "string"}
+  }
+}
