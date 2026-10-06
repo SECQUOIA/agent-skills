@@ -59,16 +59,25 @@ report missing fields as unknown. Hook observations are not independent episodes
 causal model attribution, or an overall measure of workflow quality.
 
 Before submission, validate changed skill metadata and links, run tests for changed
-executable behavior, and explain material relocated or retired rules. Runtime checks
-can be run from the repository with:
+executable behavior, and explain material relocated or retired rules in the commit
+body or a tracked review note. Do not rely on temporary audit files as the only
+explanation. Install development-only validation dependencies and run:
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -m pip install -r requirements-dev.txt
+python3 -B scripts/validate_skill_metadata.py
+python3 -B -m unittest discover -s tests
 bash -n install.sh uninstall.sh
 ```
 
 Behavioral evaluations provide different evidence from these deterministic tests.
 Report what actually ran and any untested model/client combinations.
+
+For an isolated lessons worktree, use the
+[integration procedure](skills/apply-conversation-lessons/references/integrating-isolated-work.md).
+Rebasing the isolated branch may prevent a fast-forward back to the personal
+branch. Preserve the result until ancestry, destination ownership, and transferred
+lesson commits are verified; do not reset the destination to complete integration.
 
 ## Keep personal data separate
 

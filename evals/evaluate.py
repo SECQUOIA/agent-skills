@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare and score safe skill decision experiments, without GitHub actions."""
+"""Prepare decision experiments; score separately annotated, free-text plans."""
 
 import argparse
 import hashlib
@@ -10,6 +10,9 @@ import subprocess
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+FORMAT = 3
+LABELS = {"model", "reasoning_effort", "client_version", "trial", "adapter_kind",
+          "model_identity_source"}
 
 
 def read_json(path):
@@ -78,7 +81,7 @@ def case_ids(cases):
 def validate_trial(output):
     """Reject altered documents/prompts before running or attributing results."""
     manifest = read_json(output / "manifest.json")
-    if manifest.get("format_version") != 2:
+    if manifest.get("format_version") != FORMAT:
         raise ValueError("Unsupported trial format; prepare a new trial")
     ids = case_ids([{"id": value} for value in manifest["cases"]])
     workspace = output / "workspace"
@@ -98,16 +101,25 @@ def validate_trial(output):
     return manifest
 
 
-def prepare(root, output, arm, cases, ref=None):
+def prepare(root, output, arm, cases, ref=None, expectations=None):
     if output.exists():
         raise ValueError("Use a new output directory; prior trials must remain intact")
-    if arm == "current" and not ref:
-        raise ValueError("The current arm needs an explicit pre-change --ref")
+    if arm not in {"baseline", "current", "candidate", "minimal", "no-policy"}:
+        raise ValueError("Unknown arm")
+    if arm in {"baseline", "current"} and not ref:
+        raise ValueError("The baseline/current arm needs an explicit pre-change --ref")
+    if arm == "candidate" and ref:
+        raise ValueError("Candidate means the working tree; use baseline with --ref")
     ids = case_ids(cases)
+    if expectations is None:
+        expectations = read_json(ROOT / "evals/expectations.json")
+    selected_expectations = {case_id: expectations[case_id] for case_id in ids}
     documents, revision = snapshot(root, ref)
     skill_catalog = catalog(documents)
     if arm == "minimal":
         documents = {"POLICY.md": (ROOT / "evals/minimal-policy.md").read_text()}
+    elif arm == "no-policy":
+        documents, skill_catalog = {}, ""
     output.mkdir(parents=True)
     workspace = output / "workspace"
     workspace.mkdir()
@@ -115,43 +127,48 @@ def prepare(root, output, arm, cases, ref=None):
         path = workspace / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body)
-    actions = sorted({action for case in cases for key in ("required", "forbidden")
-                      for action in case[key]})
-    policy = "Read POLICY.md." if arm == "minimal" else (
-        "Read the selected skill and applicable references from this workspace. "
-        "Use progressive disclosure; you may inspect the catalog to decide routing."
-    )
+    if arm == "no-policy":
+        policy = "No skill documents or catalog are supplied. Use your ordinary judgment."
+    elif arm == "minimal":
+        policy = "Read POLICY.md."
+    else:
+        policy = ("Read the selected skill and applicable references from this workspace. "
+                  "Use progressive disclosure; you may inspect the catalog to decide routing.")
     prompts = {}
     for case in cases:
         prompt = (
             "This is a decision simulation. Do not execute the proposed workflow or "
             "access GitHub, networks, real checkouts, or user settings. Read only this "
             "experiment's documents. Ignore unrelated installed skills.\n" + policy +
-            "\n\nCatalog:\n" + skill_catalog + "\n\nScenario:\n" +
-            json.dumps({k: case[k] for k in ("id", "request", "evidence")}, indent=2) +
+            ("\n\nCatalog:\n" + skill_catalog if skill_catalog else "") + "\n\nScenario:\n" +
+            json.dumps({k: case[k] for k in ("request", "observations")}, indent=2) +
             "\n\nReturn JSON only: selected_skill (name or null), actions (ordered "
-            "unique action IDs you would take), rationale (concise evidence). "
-            "Use applicable IDs from this shared vocabulary; do not include an ID "
-            "just to discuss rejecting it:\n" + json.dumps(actions) + "\n"
+            "steps in your own words, including intended tools, checks, writes, and "
+            "stopping conditions), rationale (concise evidence). State what you would "
+            "do next from the supplied observations; do not claim you executed it.\n"
         )
         (output / (case["id"] + ".prompt.txt")).write_text(prompt)
         prompts[case["id"]] = prompt
     metadata = {
-        "format_version": 2, "evaluation_kind": "decision-simulation",
+        "format_version": FORMAT, "evaluation_kind": "decision-simulation",
         "arm": arm, "source_revision": revision, "bundle_sha256": digest(documents),
         "catalog_sha256": hashlib.sha256(skill_catalog.encode()).hexdigest(),
         "bundle_bytes": sum(len(v.encode()) for v in documents.values()),
         "cases": ids, "prompt_sha256": digest(prompts),
         "case_sha256": digest({case["id"]: case for case in cases}),
+        "expectations_sha256": digest(selected_expectations),
+        "routing_scored": arm != "no-policy",
         "model": None, "reasoning_effort": None, "client_version": None,
-        "harness_version": "2", "trial": None,
+        "adapter_kind": None, "model_identity_source": None,
+        "harness_version": str(FORMAT), "trial": None,
     }
     write_json(output / "manifest.json", metadata)
     # The runner's working directory contains only documents, never answer keys.
     return metadata
 
 
-def score(case, response, vocabulary=None):
+def score(case, response, annotation=None, routing=True):
+    """A separate reviewer maps free-text actions to rubric IDs; never infer semantics here."""
     errors = []
     if not isinstance(response, dict) or set(response) != {"selected_skill", "actions", "rationale"}:
         return {"pass": False, "errors": ["invalid response object"]}
@@ -160,23 +177,43 @@ def score(case, response, vocabulary=None):
             or len(actions) != len(set(actions)) or not isinstance(response["rationale"], str)
             or (response["selected_skill"] is not None and not isinstance(response["selected_skill"], str))):
         return {"pass": False, "errors": ["invalid response fields"]}
-    if vocabulary is None:
-        vocabulary = set(case["required"]) | set(case["forbidden"])
-    errors.extend("unknown action: " + action for action in actions if action not in vocabulary)
-    if response["selected_skill"] not in case["skills"]:
-        errors.append("wrong skill")
+    if not isinstance(annotation, dict):
+        return {"pass": None, "errors": ["unassessed: separate annotation required"]}
+    if annotation.get("response_sha256") != digest(response):
+        return {"pass": None, "errors": ["annotation response hash mismatch"]}
+    if (not isinstance(annotation.get("reviewer"), str) or not annotation["reviewer"].strip()
+            or annotation.get("reviewer_kind") not in {"human", "model", "scripted-test"}
+            or not isinstance(annotation.get("evidence"), str) or not annotation["evidence"].strip()):
+        return {"pass": None, "errors": ["annotation needs reviewer identity, kind, and evidence"]}
+    actions = annotation.get("actions")
+    if (not isinstance(actions, list) or any(not isinstance(a, str) for a in actions)
+            or len(actions) != len(set(actions))):
+        return {"pass": None, "errors": ["invalid annotated actions"]}
+    vocabulary = set(case["required"]) | set(case["forbidden"]) | set(case.get("optional", []))
+    unknown = [action for action in actions if action not in vocabulary]
+    if unknown:
+        return {"pass": None, "errors": ["unknown annotated action: " + a for a in unknown]}
+    routing_pass = response["selected_skill"] in case["skills"] if routing else None
     errors.extend("missing action: " + a for a in case["required"] if a not in actions)
     errors.extend("forbidden action: " + a for a in case["forbidden"] if a in actions)
     for first, second in case.get("before", []):
         if first in actions and second in actions and actions.index(first) >= actions.index(second):
             errors.append("wrong order: " + first + " before " + second)
-    return {"pass": not errors, "errors": errors}
+    behavior_pass = not errors
+    if routing_pass is False:
+        errors.insert(0, "wrong skill")
+    return {"pass": not errors, "behavior_pass": behavior_pass,
+            "routing_pass": routing_pass, "errors": errors}
 
 
 def run(output, runner, labels, timeout):
+    if (output / "scores.json").exists():
+        raise ValueError("Trial scores already exist; prepare a new trial instead of modifying graded results")
     manifest = validate_trial(output)
-    if set(labels) - {"model", "reasoning_effort", "client_version", "trial"}:
+    if set(labels) - LABELS:
         raise ValueError("Unexpected runtime label")
+    if labels.get("adapter_kind") not in {"model", "scripted", "manual"}:
+        raise ValueError("Declare adapter_kind as model, scripted, or manual")
     if any((output / (case_id + suffix)).exists()
            for case_id in manifest["cases"] for suffix in (".response.json", ".metrics.json")):
         raise ValueError("Trial results exist; prepare a new trial instead of relabeling or overwriting")
@@ -212,7 +249,7 @@ def main():
     prep = sub.add_parser("prepare")
     prep.add_argument("--root", type=Path, default=ROOT)
     prep.add_argument("--output", type=Path, required=True)
-    prep.add_argument("--arm", choices=["current", "candidate", "minimal"], required=True)
+    prep.add_argument("--arm", choices=["baseline", "current", "candidate", "minimal", "no-policy"], required=True)
     prep.add_argument("--ref")
     prep.add_argument("--case", action="append")
     execute = sub.add_parser("run")
@@ -220,6 +257,8 @@ def main():
     execute.add_argument("--model")
     execute.add_argument("--reasoning-effort")
     execute.add_argument("--client-version")
+    execute.add_argument("--adapter-kind", choices=["model", "scripted", "manual"], required=True)
+    execute.add_argument("--model-identity-source")
     execute.add_argument("--trial", type=int, required=True)
     execute.add_argument("--timeout", type=float, default=300)
     execute.add_argument("runner", nargs=argparse.REMAINDER)
@@ -238,9 +277,11 @@ def main():
             parser.error("supply a runner executable after --")
         if args.timeout <= 0 or args.trial < 1:
             parser.error("timeout and trial must be positive")
-        labels = {key: getattr(args, key) for key in ("model", "reasoning_effort", "client_version", "trial")}
+        labels = {key: getattr(args, key) for key in LABELS}
         run(args.output.resolve(), runner, labels, args.timeout)
     else:
+        if (args.output / "scores.json").exists():
+            parser.error("scores already exist; retain historical grading and prepare a new trial")
         try:
             manifest = validate_trial(args.output)
         except (KeyError, OSError, ValueError) as error:
@@ -249,8 +290,10 @@ def main():
         if (len(selected) != len(manifest["cases"]) or
                 digest({case["id"]: case for case in selected}) != manifest["case_sha256"]):
             parser.error("case definitions changed; prepare a new trial")
-        vocabulary = {action for case in selected for key in ("required", "forbidden")
-                      for action in case[key]}
+        expectations = read_json(ROOT / "evals/expectations.json")
+        selected_expectations = {case["id"]: expectations[case["id"]] for case in selected}
+        if digest(selected_expectations) != manifest["expectations_sha256"]:
+            parser.error("grading expectations changed; prepare a new trial")
         results = {}
         for case in selected:
             try:
@@ -258,10 +301,21 @@ def main():
             except (OSError, ValueError):
                 results[case["id"]] = {"pass": False, "errors": ["missing or invalid response"]}
             else:
-                results[case["id"]] = score(case, response, vocabulary)
+                try:
+                    annotation = read_json(args.output / (case["id"] + ".assessment.json"))
+                except (OSError, ValueError):
+                    annotation = None
+                results[case["id"]] = score(expectations[case["id"]], response, annotation,
+                                            manifest["routing_scored"])
+                results[case["id"]]["response_sha256"] = digest(response)
+                results[case["id"]]["assessment_sha256"] = digest(annotation) if annotation else None
         report = {"manifest": manifest, "results": results,
-                  "passed": sum(r["pass"] for r in results.values()), "total": len(results),
-                  "limitation": "Decisions only; does not verify actual tool behavior or production success."}
+                  "passed": sum(r["pass"] is True for r in results.values()),
+                  "behavior_passed": sum(r.get("behavior_pass") is True for r in results.values()),
+                  "routing_passed": sum(r.get("routing_pass") is True for r in results.values()),
+                  "routing_assessed": sum(r.get("routing_pass") is not None for r in results.values()),
+                  "unassessed": sum(r["pass"] is None for r in results.values()), "total": len(results),
+                  "limitation": "Reviewer-annotated decisions only; no execution or performance claim."}
         write_json(args.output / "scores.json", report)
         print(json.dumps(report, indent=2))
         return 0 if report["passed"] == report["total"] else 1

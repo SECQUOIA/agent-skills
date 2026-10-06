@@ -132,6 +132,17 @@ not necessarily the writer. Legacy attempts have no reconstructed attribution or
 per-attempt outcome; they appear as `unattributed_legacy_observations`. Reports include
 all observations belonging to episodes active in the selected window.
 
+Target-resolution diagnostics are separate from tracked-target violations.
+`unresolved_target_episodes` includes dynamic or unsupported identities that cannot
+establish an exact preflight/readback match; these do not count toward the lesson
+threshold. `eligible_for_lessons` records whether tracked violations meet that
+threshold. `legacy_inferred_target_episodes` explicitly identifies classification
+inferred from old stored labels. Raw history is retained. Enforcement remains
+conservative and can deny an unsupported request shape; an unresolved diagnostic
+does not prove the agent omitted a read. File-backed and provably literal inline
+GraphQL can use bound node identity; interpolated or multi-target queries remain
+unresolved rather than authorizing a guessed target.
+
 Hooks do not persist prompts, transcripts, command bodies, or raw lifecycle IDs.
 Transient identifiers are hashed and pruned after 30 days. Runtime parsing accepts
 bounded identifier labels, ignoring nested metadata and tool output. Keep manual
@@ -166,3 +177,6 @@ Uninstall removes this checkout's owned skill entries and hook handlers associat
 with its source or currently owned installed scripts. It preserves hooks belonging
 to another checkout and retains the local encounter history. See
 [CONTRIBUTING.md](CONTRIBUTING.md) before changing shared skills.
+
+The [refresh review notes](review-notes/2026-10-skill-refresh.md) record retained,
+relocated, and corrected contracts, plus the limits of the evaluation evidence.

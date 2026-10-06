@@ -36,3 +36,19 @@ actual GitHub/tool execution, latency improvement, or superior model performance
 Use [the evaluation guide](README.md) for repeated comparisons and disposable
 workflow trials before making those claims. No live installation, hook settings,
 encounter database, or GitHub publication was used for these checks.
+
+## Historical scope after the format 3 correction
+
+The measurements and trial above are retained unchanged as a historical record.
+They describe the earlier format 2 fixtures retained in `history/cases-v2.json`,
+not the expanded format 3 cases. Those prompts included semantic scenario labels,
+already-interpreted evidence, and a shared action-ID menu. A perfect score on that
+small suite may have limited discriminatory value; it does not establish leakage
+or prove that the suite was saturated. The trial did not cover submission, merge,
+or triage as selected workflows. No comparative performance conclusion follows.
+
+Format 3 removes those prompt labels/menu, separates raw observations from
+grader-only expectations, and requires independent annotation of free-text plans.
+Disposable Git/fake-gh fixtures now exercise actual local tool traces using
+scripted test adapters. No new model decision or workflow results are claimed by
+those harness changes, and this historical trial is not retroactively regraded.

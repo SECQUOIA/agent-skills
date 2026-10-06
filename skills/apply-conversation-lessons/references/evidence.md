@@ -10,6 +10,9 @@ change. These are separate sources of evidence:
   reasoning setting, client version, and skill revision. Unknown metadata stays
   unknown. A mixed-agent/model episode is not attributable solely to its last
   participant; observations are not independent episodes.
+  Unresolved target identities are coverage diagnostics, not demonstrated
+  missing-read violations. Exclude them from recurrence eligibility; retain and
+  explain any legacy inference rather than rewriting historical outcomes.
 - **Behavioral evaluations:** controlled requests, recorded actions, artifacts,
   and scored outcomes under the evaluated conditions.
 
@@ -27,6 +30,10 @@ and missing metadata. Repeat representative cases before making comparative clai
 Include implicit/explicit activation and negative controls, authorization limits,
 dirty workspaces, stale heads/CI, ambiguous writes, domain defects, and trivial
 changes that should not trigger broad testing.
+Give the actor raw observations, not a diagnosis embedded in the scenario title
+or evidence. Keep answer keys and semantic action labels outside its workspace.
+Include every publishing workflow and consumers of changed output contracts;
+synthetic successful decisions do not establish safe execution of those workflows.
 
 Score correctness, completion, preservation of user work, external-write scope,
 unnecessary questions, and work performed. Critical permission/data-loss failures
