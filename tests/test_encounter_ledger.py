@@ -2782,7 +2782,7 @@ class EncounterLedgerTests(unittest.TestCase):
             "/tmp",
         )[0]
 
-        self.assertEqual(selected_query.kind, "unknown")
+        self.assertEqual(selected_query.kind, "read")
         self.assertFalse(selected_query.read_eligible)
         self.assertEqual(selected_mutation.kind, "write")
         self.assertFalse(selected_mutation.read_eligible)
