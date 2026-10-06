@@ -9,6 +9,11 @@ These are the shared constraints for SECQUOIA GitHub work. The invoking skill
 defines the deliverable and allowed actions; the user's explicit scope controls.
 Read the relevant reference when its condition applies, not every reference.
 
+Every workflow remains usable by one agent. Delegation is optional: honor a solo
+request, and proceed sequentially when helpers are unavailable or unhelpful, with
+the same scope, checks, and completion criteria. Invoking another skill does not
+require spawning another agent.
+
 ## Target and authorization
 
 - Use `gh` for every GitHub interaction, not MCP, browser automation, or the web
@@ -27,10 +32,13 @@ Read the relevant reference when its condition applies, not every reference.
   them. Do not infer permission for another publication surface, access change,
   destructive cleanup, or an edit to published history.
 - Subagents inherit scope and read-only restrictions, but publication authority
-  stays with the parent unless the user explicitly delegates it. Have subagents
-  return their findings and evidence; the parent verifies the claims and publishes
-  once. Reuse sound evidence when relevant source, tests, inputs, and environment
-  remain applicable; delegation alone does not require repeating experiments.
+  stays with the overall task's designated publisher unless the user explicitly
+  delegates it. Before delegating, or coordinating concurrent work on a target,
+  read [delegation and ownership](references/delegation.md). A child's assignment
+  bounds any skill it loads; nested delegation creates no new publication owner.
+  Return evidence to the coordinator for verification and one publication. Reuse
+  sound evidence when its relevant inputs remain valid; delegation alone does not
+  require repeating experiments.
 - Existing PR titles/bodies, submitted reviews, comments, and replies are immutable
   by default. Add new information unless the user requests the particular edit.
   A skill's explicit idempotent maintenance contract may include updating its

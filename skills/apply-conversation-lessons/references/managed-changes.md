@@ -3,6 +3,11 @@
 Read before changing a skill whose real path belongs to a shared repository,
 contains a `.managed-skills` marker, or has a documented review cadence.
 
+For delegated analysis or edits, first use the shared
+[optional delegation contract](../../gh-workflow-conventions/references/delegation.md).
+The same lessons pass remains complete in one agent; helpers return bounded
+changes/evidence and do not independently sync, integrate, submit, or publish.
+
 1. Resolve the skill's real repository, current branch, and status. For an owned
    copy, verify its installation marker and source using the linked sync procedure
    before editing; edit the managed source and refresh the owned copy afterward.

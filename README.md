@@ -26,6 +26,13 @@ See [the issue-to-release pipeline](PIPELINE.md), [contribution workflow](CONTRI
 and [behavioral evaluation guide](evals/README.md). Install the whole set: sibling
 references connect these workflows and break if individual folders are installed alone.
 
+Every skill works in a single-agent workflow. Helpers are optional and follow the
+[delegation contract](skills/gh-workflow-conventions/references/delegation.md):
+bounded assignments, owned workspaces/resources, evidence tied to the actual
+changes, and one coordinator for integration and publication. Solo use requires
+no agent configuration or coordination records. Concurrent independent publishers
+must arrange ownership rather than treating duplicate markers as locks.
+
 ## Installation and discovery
 
 The installer requires Bash, Git, and Python 3.10 or newer. Use it from a POSIX shell

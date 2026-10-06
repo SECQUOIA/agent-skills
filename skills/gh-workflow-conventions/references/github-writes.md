@@ -28,6 +28,11 @@ authorized invitation's permissions and distinguish pending from active access.
 
 ## Precondition → write → readback
 
+When workers or concurrent invocations share a target, establish the single
+publication owner under [delegation guidance](delegation.md). A sentinel absence
+check does not reserve the target against another publisher. This adds no owner
+handoff requirement to an ordinary solo invocation.
+
 1. Finish local preparation and make the payload reviewable. Read the target's
    live identity, state, head, and operation-specific gates in a separate `gh`
    command with literal repository scope. Inspect the result before writing.

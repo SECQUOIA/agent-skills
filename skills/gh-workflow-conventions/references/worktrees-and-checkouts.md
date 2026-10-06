@@ -8,7 +8,7 @@ checkout another session may use.
 Record its branch, HEAD, and status before switching or editing. The primary
 checkout is suitable when unrelated files neither overlap nor affect verification.
 Use isolation for overlapping or verification-affecting user changes, divergent
-branches, wrong source, concurrent activity, or uncertain safety. Do not stash,
+branches, wrong source, uncoordinated concurrent activity, or uncertain safety. Do not stash,
 delete, or reset user work merely to
 satisfy a clean-tree preference. A branch backup does not preserve uncommitted files.
 Unexpected branch/HEAD movement can be another session's work; inspect fresh state
@@ -35,6 +35,8 @@ probe in a disposable copy; see [mutation testing](mutation-testing.md).
   alter behavior. Materialize the complete verified tree.
 - Give concurrent agents separate scratch directories. Preserve reusable baselines
   outside child cleanup roots; each child removes only its own artifacts.
+  For delegated edits, shared resource ownership, or worker handoff, also apply
+  [delegation guidance](delegation.md) before assigning or integrating work.
 
 ## Verify source and execution identity
 

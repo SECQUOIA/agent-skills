@@ -6,6 +6,13 @@ it does not authorize that stage's writes unless the user requested the broader
 workflow. All stages share [`gh-workflow-conventions`](skills/gh-workflow-conventions/SKILL.md)
 and load specialized references only when relevant.
 
+One agent can execute every authorized stage. Invoking a component skill does not
+require another agent. When delegation helps, use the shared
+[delegation contract](skills/gh-workflow-conventions/references/delegation.md):
+workers perform bounded tasks, while the coordinator verifies handoffs, integrates
+changes, and owns stage transitions and publication. A prepared worker result
+does not complete a stage that still requires a verified push, review, or merge.
+
 ```
                  ┌──────────────────┐
    issue  ──────▶│ gh-triage-issue  │  reproduce → failing test + acceptance criteria

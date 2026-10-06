@@ -5,6 +5,10 @@ work under [worktree guidance](worktrees-and-checkouts.md).
 
 ## Scope and staged content
 
+When edits are delegated, follow [ownership and integration](delegation.md) before
+staging: one owner operates each shared index, and worker results remain intact
+until their integration is verified.
+
 - Stage explicit intended paths. Inspect `git status --porcelain -uall` as well as
   working-tree and cached diffs: ordinary diff omits untracked files, and a probe
   can leave the index at a different revision than the tested worktree. Review the
