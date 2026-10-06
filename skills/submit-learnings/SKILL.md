@@ -1,6 +1,6 @@
 ---
 name: submit-learnings
-description: Push accumulated changes from a personal managed-skills branch and open or update its learnings PR. Use when asked to submit or share learnings; does not review or merge.
+description: Submit accumulated skill learnings by pushing the personal branch and creating a PR or posting a new status comment. Preserves existing PR text; does not review or merge.
 ---
 
 # Submit Learnings

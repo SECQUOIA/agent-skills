@@ -10,10 +10,9 @@ contains a `.managed-skills` marker, or has a documented review cadence.
    `learnings/<user>` branch and inspect dirty state without mutating it.
 2. If the checkout is not writable or another session is using it, use an isolated
    worktree from the personal branch with the required filesystem permission.
-   Edit, validate, and commit there, then fast-forward the personal branch only
-   after rechecking its head and worktree. Remove the temporary worktree/ref after
-   integration. Choose isolation before any sync/rebase or branch mutation, not
-   after syncing a shared checkout. Preserve uncommitted work in the original;
+   Record the original personal tip before synchronizing the isolated branch.
+   Choose isolation before any sync/rebase or branch mutation, not after syncing
+   a shared checkout. Preserve uncommitted work in the original;
    do not silently transfer unrelated changes or clear them during integration.
    Do not bypass file-edit restrictions with shell rewrites.
 3. In the selected writable, exclusive checkout, validate and commit clearly
@@ -21,14 +20,21 @@ contains a `.managed-skills` marker, or has a documented review cadence.
    or ambiguous dirty work and report it when it prevents a clean sync. Refresh the
    personal working branch with the sibling
    [sync procedure](../../sync-secquoia-skills/references/branch-sync.md) before new edits.
+   In isolation, record the pinned upstream and post-sync tip separately so the
+   new lesson commits can later be identified without replaying old work twice.
 4. Commit focused validated changes using the observed message style. Stage only
    intended content. Recheck status and recent history before staging: if another
    session advanced HEAD, inspect its commits before deciding what remains.
-   Verify the staged snapshot and resulting commit; do not reclaim attribution
+   Include the concrete problem, changed/retired contracts, and validation in the
+   commit body for consequential changes. Verify the staged snapshot and resulting commit; do not reclaim attribution
    by amending or rebasing someone else's work.
-5. When adopting selected lessons from another contributor, copy only the agreed
+5. For isolated work, use [integration planning](integrating-isolated-work.md).
+   Rebase can rewrite ancestry: fast-forward only when it is actually possible.
+   Preserve the worktree/result and backup until integration is verified; report
+   integration pending when the destination cannot safely be reconciled.
+6. When adopting selected lessons from another contributor, copy only the agreed
    paths onto the user's personal branch; do not merge their entire branch.
-6. Keep commits local. Pushing/opening a PR belongs to an explicit
+7. Keep commits local. Pushing/opening a PR belongs to an explicit
    `submit-learnings` request, followed by the repository's review cadence.
 
 ## Private and installed skills

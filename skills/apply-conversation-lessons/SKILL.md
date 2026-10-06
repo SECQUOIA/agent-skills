@@ -1,6 +1,6 @@
 ---
 name: apply-conversation-lessons
-description: Improve existing skills from a requested conversation-lessons pass. Use for durable workflow changes, not automatic updates after ordinary tasks.
+description: Fold conversation takeaways or lessons into existing skills when requested. Use for durable workflow improvements; does not run automatically or submit accumulated changes.
 ---
 
 # Apply Conversation Lessons
@@ -45,6 +45,8 @@ change only the smallest appropriate owner.
   consolidated, relocated, or deliberately retired with reasons. Check that
   callers reach relocated rules before the action they govern. Independent
   verification at a handoff can remain necessary even when its wording is shared.
+  Record consequential dispositions and validation limits in the commit body or
+  a tracked review note; a temporary audit alone is not durable review evidence.
 - Update affected consumers, including authorized private orchestrators, when
   contracts change. Keep private skill names and contents outside tracked files.
   Keep shared instructions agent-neutral and frontmatter compatible with both
