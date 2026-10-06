@@ -16,6 +16,7 @@ universal requirement. Do not change global configuration merely to inspect a PR
 | `--slurp` unavailable | Paginate supported output and parse pages separately; nested GraphQL connections may need explicit cursor loops. |
 | ProjectsV2 `INSUFFICIENT_SCOPES` | Report the missing `read:project` access and the claim it prevents verifying. Do not invent Project counts or change account scopes without authorization. |
 | Deprecated Projects field notice during a write | Read the target: some CLI versions exit zero without applying it. If unapplied, repeat the same authorized write through narrow REST and verify the actual field. |
+| `gh pr merge` refuses locally despite a verified review exception | Recheck the actor's live exception and every remaining gate under [CI and checks](ci-and-checks.md). Use the equivalent server-validated merge endpoint through `gh api`, preserving the repository, PR, allowed strategy, and exact head `sha` guard, then read back the merge. Do not substitute `--admin`; a server-side policy/permission rejection still stops the mutation. |
 | EOF/timeout/reset after mutation dispatch | Apply [ambiguous-outcome readback](github-writes.md) before retrying. If a body-file PATCH is proven unapplied, a JSON `--input` payload is a suitable equivalent. |
 | Readback query fails after a successful write | Repair the query; do not resubmit the write. |
 | Empty completed-job logs | Fetch `actions/jobs/<job_id>/logs` directly; confirm nonempty output before absence claims. Running jobs may not expose complete logs yet. |

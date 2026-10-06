@@ -86,6 +86,21 @@ Use live `reviewDecision`, merge state, threads, and checks without inventing ga
 resolve threads. For required code-owner review, inspect CODEOWNERS at the proper
 ref and use its last matching rule to identify eligible owners.
 
+When a review exception is requested, distinguish PR authorship from the actor
+performing the merge. GitHub's classic `bypass_pull_request_allowances` applies to
+the actor across PRs and can also bypass required PR creation. An author-only
+request does not by itself authorize that broader allowance; explain the scope
+and obtain authorization for it or use a mechanism matching the requested scope.
+Preserve existing bypass entries and unrelated protections. Read back both the
+exception and the required CI checks after an authorized settings change.
+
+An aggregate `REVIEW_REQUIRED` or `BLOCKED` can remain after an actor-specific
+review exception is configured. Establish its applicability from the live policy
+and authenticated actor, not the aggregate label alone. The exception does not
+waive CI or unresolved blocking feedback. For a client-only merge refusal after
+these gates pass, follow [CLI troubleshooting](github-troubleshooting.md);
+do not turn a review exception into a blanket admin bypass.
+
 Stacked PR gates and CI branch filters depend on the current base. After a parent
 merges, re-read siblings' bases: keeping the parent branch can leave them targeting
 that branch. Retarget only within authorized scope and re-evaluate gates and event
