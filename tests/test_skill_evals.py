@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -13,7 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def module(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     result = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(result)
+    with mock.patch.object(sys, "path", [str(path.parent), *sys.path]):
+        spec.loader.exec_module(result)
     return result
 
 
@@ -421,6 +423,218 @@ subprocess.run(["gh", "pr", "comment", "42", "--repo", "example/project", "--bod
             (untouched / "repo/notes.txt").write_text("changed before run")
             with self.assertRaisesRegex(ValueError, "fixture changed"):
                 wf.run(untouched, [sys.executable, "-c", "print('done')"], "scripted")
+
+
+class EffortMetadataTests(unittest.TestCase):
+    """Exercise metadata retention with local scripted adapters, never model calls."""
+
+    def prepare_decision(self, output):
+        cases = ev.read_json(ROOT / "evals/cases.json")[:1]
+        ev.prepare(ROOT, output, "minimal", cases)
+
+    def decision_report(self, output):
+        response = {"selected_skill": "explain-pr-to-me", "actions": ["Inspect and explain."],
+                    "rationale": "No writes were requested."}
+        ev.write_json(output / "c001.response.json", response)
+        ev.write_json(output / "c001.assessment.json",
+                      assessment(response, ["inspect_current_diff", "explain_verified_behavior"]))
+        result = subprocess.run([sys.executable, "-B", str(ROOT / "evals/evaluate.py"),
+                                 "score", "--output", str(output)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return ev.read_json(output / "scores.json")
+
+    def assert_efforts(self, record, expected):
+        for key, value in expected.items():
+            self.assertEqual(record[key], value, (key, record))
+
+    def test_decision_cli_retains_differing_request_and_report_through_scoring(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "decision"
+            self.prepare_decision(output)
+            result = subprocess.run(
+                [sys.executable, "-B", str(ROOT / "evals/evaluate.py"), "run", "--output", str(output),
+                 "--adapter-kind", "scripted", "--trial", "1", "--requested-reasoning-effort", "xhigh",
+                 "--reasoning-effort", "high", "--reasoning-effort-source", "client-reported",
+                 "--", sys.executable, "-c", "print('{}')"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            expected = {"reasoning_effort": "high", "reasoning_effort_source": "client-reported",
+                        "requested_reasoning_effort": "xhigh"}
+            self.assert_efforts(ev.read_json(output / "manifest.json"), expected)
+            self.assert_efforts(ev.read_json(output / "c001.metrics.json"), expected)
+            self.assert_efforts(self.decision_report(output)["manifest"], expected)
+
+    def test_workflow_cli_retains_differing_request_and_report_through_scoring(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "workflow"
+            wf.prepare(output, "publish")
+            result = subprocess.run(
+                [sys.executable, "-B", str(ROOT / "evals/workflow_fixture.py"), "run",
+                 "--output", str(output), "--adapter-kind", "scripted",
+                 "--requested-reasoning-effort", "xhigh", "--reasoning-effort", "high",
+                 "--reasoning-effort-source", "client-reported",
+                 "--", sys.executable, "-c", GOOD_ADAPTER], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            expected = {"reasoning_effort": "high", "reasoning_effort_source": "client-reported",
+                        "requested_reasoning_effort": "xhigh"}
+            self.assert_efforts(wf.read(output / "manifest.json"), expected)
+            self.assert_efforts(wf.read(output / "execution.json"), expected)
+            scored = subprocess.run(
+                [sys.executable, "-B", str(ROOT / "evals/workflow_fixture.py"), "score",
+                 "--output", str(output)], capture_output=True, text=True)
+            self.assertEqual(scored.returncode, 0, scored.stderr)
+            report = wf.read(output / "scores.json")
+            self.assert_efforts(report["runtime"], expected)
+            self.assert_efforts(report["manifest"], expected)
+
+    def test_defaults_requests_and_all_source_labels_survive_both_runner_apis(self):
+        examples = [{}, {"reasoning_effort": "high"}, {"requested_reasoning_effort": "xhigh"}]
+        examples.extend({"reasoning_effort": "high", "reasoning_effort_source": source,
+                         "requested_reasoning_effort": "high" if source == "requested" else "xhigh"}
+                        for source in ("requested", "client-reported", "inferred", "unknown"))
+        with tempfile.TemporaryDirectory() as directory:
+            for index, labels in enumerate(examples):
+                with self.subTest(labels=labels):
+                    expected = dict(reasoning_effort=None, reasoning_effort_source="unknown",
+                                    requested_reasoning_effort=None)
+                    expected.update(labels)
+                    decision = Path(directory) / ("decision-" + str(index))
+                    self.prepare_decision(decision)
+                    ev.run(decision, [sys.executable, "-c", "print('{}')"],
+                           dict(adapter_kind="scripted", **labels), 5)
+                    self.assert_efforts(ev.read_json(decision / "manifest.json"), expected)
+                    self.assert_efforts(ev.read_json(decision / "c001.metrics.json"), expected)
+                    workflow = Path(directory) / ("workflow-" + str(index))
+                    wf.prepare(workflow, "head-moved")
+                    execution = wf.run(workflow, [sys.executable, "-c", GOOD_ADAPTER], "scripted", **labels)
+                    self.assert_efforts(execution, expected)
+                    self.assert_efforts(wf.score(workflow)["runtime"], expected)
+
+    def test_historical_decision_missing_and_null_provenance_is_not_inferred_or_rewritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for source in ("absent", None):
+                with self.subTest(source=source):
+                    output = Path(directory) / str(source)
+                    self.prepare_decision(output)
+                    manifest = ev.read_json(output / "manifest.json")
+                    manifest["reasoning_effort"] = "medium"
+                    manifest.pop("requested_reasoning_effort")
+                    if source == "absent":
+                        manifest.pop("reasoning_effort_source")
+                    else:
+                        manifest["reasoning_effort_source"] = source
+                    ev.write_json(output / "manifest.json", manifest)
+                    saved = (output / "manifest.json").read_bytes()
+                    self.assertEqual(self.decision_report(output)["manifest"], manifest)
+                    self.assertEqual((output / "manifest.json").read_bytes(), saved)
+
+    def test_historical_workflow_missing_and_null_provenance_is_not_inferred_or_rewritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for source in ("absent", None):
+                with self.subTest(source=source):
+                    output = Path(directory) / str(source)
+                    wf.prepare(output, "head-moved")
+                    wf.run(output, [sys.executable, "-c", GOOD_ADAPTER], "scripted",
+                           reasoning_effort="medium")
+                    for name in ("manifest.json", "execution.json"):
+                        record = wf.read(output / name)
+                        record.pop("requested_reasoning_effort")
+                        record.pop("reasoning_effort_source")
+                        if name == "manifest.json":
+                            record.pop("reasoning_effort")  # Old workflow manifests had no effort fields.
+                        elif source is None:
+                            record["reasoning_effort_source"] = None
+                        wf.write(output / name, record)
+                    saved = {name: (output / name).read_bytes() for name in ("manifest.json", "execution.json")}
+                    report = wf.score(output)
+                    self.assertTrue(report["pass"])
+                    self.assertEqual(report["runtime"]["reasoning_effort"], "medium")
+                    self.assertNotIn("requested_reasoning_effort", report["runtime"])
+                    self.assertNotIn("reasoning_effort_source", report["manifest"])
+                    if source == "absent":
+                        self.assertNotIn("reasoning_effort_source", report["runtime"])
+                    else:
+                        self.assertIsNone(report["runtime"]["reasoning_effort_source"])
+                    for name, original in saved.items():
+                        self.assertEqual((output / name).read_bytes(), original)
+
+    def test_invalid_metadata_rejected_before_adapters_or_artifact_writes(self):
+        invalid = [{"reasoning_effort_source": source} for source in
+                   ("configured", [], "requested", "client-reported", "inferred")]
+        invalid.extend((
+            {"reasoning_effort": "high", "reasoning_effort_source": "requested",
+             "requested_reasoning_effort": "xhigh"},
+            {"reasoning_effort": " "}, {"reasoning_effort": 3},
+            {"requested_reasoning_effort": ""}, {"requested_reasoning_effort": []},
+        ))
+        with tempfile.TemporaryDirectory() as directory:
+            decision, workflow = Path(directory) / "decision", Path(directory) / "workflow"
+            self.prepare_decision(decision)
+            wf.prepare(workflow, "publish")
+            saved = {output: (output / "manifest.json").read_bytes() for output in (decision, workflow)}
+            marker = Path(directory) / "adapter-started"
+            adapter = [sys.executable, "-c", "from pathlib import Path; Path(" + repr(str(marker)) + ").touch()"]
+            for labels in invalid:
+                with self.subTest(labels=labels):
+                    with self.assertRaises(ValueError):
+                        ev.run(decision, adapter, dict(adapter_kind="scripted", **labels), 5)
+                    with self.assertRaises(ValueError):
+                        wf.run(workflow, adapter, "scripted", **labels)
+                    for output, original in saved.items():
+                        self.assertEqual((output / "manifest.json").read_bytes(), original)
+                    self.assertFalse(marker.exists())
+                    self.assertFalse((decision / "c001.response.json").exists())
+                    self.assertFalse((decision / "c001.metrics.json").exists())
+                    self.assertFalse((workflow / "execution.json").exists())
+                    self.assertFalse((workflow / "trace.jsonl").exists())
+
+    def test_invalid_metadata_cli_fails_before_adapters_or_manifest_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for name in ("evaluate", "workflow_fixture"):
+                output = Path(directory) / name
+                if name == "evaluate":
+                    self.prepare_decision(output)
+                else:
+                    wf.prepare(output, "publish")
+                original = (output / "manifest.json").read_bytes()
+                marker = Path(directory) / (name + "-adapter-started")
+                command = [sys.executable, "-B", str(ROOT / "evals" / (name + ".py")), "run",
+                           "--output", str(output), "--adapter-kind", "scripted"]
+                if name == "evaluate":
+                    command.extend(["--trial", "1"])
+                for arguments in (
+                    ["--reasoning-effort-source", "configured"],
+                    ["--reasoning-effort-source", "client-reported"],
+                    ["--reasoning-effort", "high", "--reasoning-effort-source", "requested",
+                     "--requested-reasoning-effort", "xhigh"],
+                ):
+                    with self.subTest(harness=name, arguments=arguments):
+                        result = subprocess.run(command + arguments + [
+                            "--", sys.executable, "-c",
+                            "from pathlib import Path; Path(" + repr(str(marker)) + ").touch()"],
+                            capture_output=True, text=True)
+                        self.assertEqual(result.returncode, 2, result.stderr)
+                        self.assertIn("error:", result.stderr)
+                        self.assertEqual((output / "manifest.json").read_bytes(), original)
+                        self.assertFalse(marker.exists())
+
+    def test_invalid_stored_provenance_cannot_be_scored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            decision, workflow = Path(directory) / "decision", Path(directory) / "workflow"
+            self.prepare_decision(decision)
+            wf.prepare(workflow, "head-moved")
+            wf.run(workflow, [sys.executable, "-c", GOOD_ADAPTER], "scripted")
+            for path in (decision / "manifest.json", workflow / "execution.json"):
+                record = ev.read_json(path)
+                record["reasoning_effort_source"] = "configured"
+                ev.write_json(path, record)
+            scored = subprocess.run(
+                [sys.executable, "-B", str(ROOT / "evals/evaluate.py"), "score", "--output", str(decision)],
+                capture_output=True, text=True)
+            self.assertEqual(scored.returncode, 2, scored.stderr)
+            with self.assertRaisesRegex(ValueError, "reasoning_effort_source"):
+                wf.score(workflow)
+            self.assertFalse((decision / "scores.json").exists())
+            self.assertFalse((workflow / "scores.json").exists())
 
 
 if __name__ == "__main__":

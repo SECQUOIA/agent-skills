@@ -10,6 +10,11 @@ import subprocess
 import sys
 import time
 
+if __package__:
+    from . import effort_metadata
+else:
+    import effort_metadata
+
 
 SCENARIOS = ("publish", "head-moved", "lost-response", "already-posted")
 REPOSITORY = "example/project"
@@ -83,7 +88,8 @@ def prepare(root, scenario):
     write(root / "state.json", state)
     (root / "bin").mkdir()
     executable = root / "bin/gh"
-    executable.write_text("#!" + sys.executable + "\nimport runpy\nrunpy.run_path(" +
+    executable.write_text("#!" + sys.executable + "\nimport runpy, sys\nsys.path.insert(0, " +
+                          repr(str(Path(__file__).resolve().parent)) + ")\nrunpy.run_path(" +
                           repr(str(Path(__file__).resolve())) + ", run_name='__fake_gh__')\n")
     executable.chmod(0o755)
     prompt = (
@@ -99,7 +105,8 @@ def prepare(root, scenario):
                 "initial_state_sha256": fingerprint(state),
                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                 "fixture_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                "shim_sha256": hashlib.sha256(executable.read_bytes()).hexdigest()}
+                "shim_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+                **effort_metadata.labels()}
     write(root / "manifest.json", manifest)
     return manifest
 
@@ -144,12 +151,16 @@ def fake_gh(root, args):
 
 
 def run(root, adapter, adapter_kind, timeout=30, model=None, reasoning_effort=None,
-        client_version=None, policy_arm=None, model_identity_source=None):
+        client_version=None, policy_arm=None, model_identity_source=None,
+        reasoning_effort_source="unknown", requested_reasoning_effort=None):
+    efforts = effort_metadata.labels(reasoning_effort, reasoning_effort_source,
+                                     requested_reasoning_effort)
     if adapter_kind not in {"scripted", "model"}:
         raise ValueError("Declare scripted or model adapter kind")
     if (root / "execution.json").exists() or (root / "trace.jsonl").exists():
         raise ValueError("Fixture already used; prepare a new trial")
     manifest = read(root / "manifest.json")
+    effort_metadata.validate(manifest)
     if (manifest["initial_state_sha256"] != fingerprint(read(root / "state.json"))
             or manifest["initial_checkout"] != checkout_snapshot(root / "repo")
             or manifest["prompt_sha256"] != hashlib.sha256((root / "prompt.txt").read_bytes()).hexdigest()
@@ -161,6 +172,8 @@ def run(root, adapter, adapter_kind, timeout=30, model=None, reasoning_effort=No
         env.pop(key, None)
     env["PATH"] = str(root / "bin") + os.pathsep + env.get("PATH", "")
     env["SKILL_FIXTURE_ROOT"] = str(root)
+    manifest.update(efforts)
+    write(root / "manifest.json", manifest)
     started = time.monotonic()
     try:
         result = subprocess.run(adapter, input=(root / "prompt.txt").read_text(), text=True,
@@ -170,8 +183,8 @@ def run(root, adapter, adapter_kind, timeout=30, model=None, reasoning_effort=No
                      "stdout": result.stdout, "stderr": result.stderr}
     except subprocess.TimeoutExpired:
         execution = {"exit_code": None, "timeout": True}
-    execution.update(adapter_kind=adapter_kind, model=model,
-                     reasoning_effort=reasoning_effort, client_version=client_version,
+    execution.update(adapter_kind=adapter_kind, model=model, **efforts,
+                     client_version=client_version,
                      policy_arm=policy_arm, model_identity_source=model_identity_source,
                      elapsed_seconds=time.monotonic() - started,
                      tokens=None, model_tool_calls=None)
@@ -185,6 +198,8 @@ def score(root):
     trace = [json.loads(line) for line in trace_path.read_text().splitlines()] if trace_path.exists() else []
     errors = []
     execution = read(root / "execution.json")
+    effort_metadata.validate(manifest)
+    effort_metadata.validate(execution)
     if execution["timeout"] or execution["exit_code"] != 0:
         errors.append("adapter did not complete successfully")
     if checkout_snapshot(root / "repo") != manifest["initial_checkout"]:
@@ -213,8 +228,9 @@ def score(root):
                 errors.append("no exact stored-comment readback after write")
     report = {"pass": not errors, "errors": errors, "manifest": manifest,
               "adapter_kind": execution["adapter_kind"], "model": execution["model"],
-              "runtime": {key: execution[key] for key in ("reasoning_effort", "client_version",
-                                                          "policy_arm", "model_identity_source")},
+              "runtime": {key: execution[key] for key in (*effort_metadata.FIELDS, "client_version",
+                                                          "policy_arm", "model_identity_source")
+                          if key in execution},
               "trace_sha256": fingerprint(trace), "fake_gh_calls": len(trace),
               "limitation": "Local fixture traces only; scripted adapters validate this harness, not models. "
                             "Sandboxing and access outside fake gh are not enforced by this runner."}
@@ -231,13 +247,17 @@ def main():
     parser.add_argument("--scenario", choices=SCENARIOS)
     parser.add_argument("--adapter-kind", choices=["scripted", "model"])
     parser.add_argument("--model")
-    parser.add_argument("--reasoning-effort")
+    effort_metadata.add_arguments(parser)
     parser.add_argument("--client-version")
     parser.add_argument("--policy-arm")
     parser.add_argument("--model-identity-source")
     parser.add_argument("--timeout", type=float, default=30)
     args, adapter = parser.parse_known_args()
     root = args.output.resolve()
+    if args.command != "run" and (args.reasoning_effort is not None
+                                   or args.reasoning_effort_source != "unknown"
+                                   or args.requested_reasoning_effort is not None):
+        parser.error("effort labels apply only to run")
     if args.command == "prepare":
         if not args.scenario or adapter:
             parser.error("prepare requires --scenario and no adapter")
@@ -246,9 +266,13 @@ def main():
         adapter = adapter[1:] if adapter[:1] == ["--"] else adapter
         if not adapter or not args.adapter_kind or args.timeout <= 0:
             parser.error("run requires --adapter-kind, positive timeout, and adapter after --")
-        result = run(root, adapter, args.adapter_kind, args.timeout, args.model,
-                     args.reasoning_effort, args.client_version, args.policy_arm,
-                     args.model_identity_source)
+        try:
+            result = run(root, adapter, args.adapter_kind, args.timeout, args.model,
+                         args.reasoning_effort, args.client_version, args.policy_arm,
+                         args.model_identity_source, args.reasoning_effort_source,
+                         args.requested_reasoning_effort)
+        except ValueError as error:
+            parser.error(str(error))
     else:
         if adapter:
             parser.error("unexpected score arguments")

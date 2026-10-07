@@ -80,7 +80,8 @@ install, or automatically invoke any model service.
 ```bash
 python -B evals/evaluate.py run --output /tmp/skills-candidate-1 \
   --adapter-kind model --model RESOLVED_DEPLOYMENT --model-identity-source CLIENT_METADATA \
-  --reasoning-effort EFFORT --client-version CLIENT_VERSION --trial 1 \
+  --reasoning-effort EFFORT --reasoning-effort-source requested \
+  --client-version CLIENT_VERSION --trial 1 \
   -- /absolute/path/to/isolated-model-adapter
 ```
 
@@ -90,6 +91,21 @@ alone is not a resolved deployment identity. Use `--adapter-kind scripted` for
 fixture adapters; their results are not model trials. Manual collection should
 record `adapter_kind: "manual"` and the known runtime labels in the manifest before
 grading. Never replace unknowns with guessed values.
+
+`--reasoning-effort-source` describes the existing `reasoning_effort` label:
+`requested`, `client-reported`, `inferred`, or `unknown` (the default). A known
+source requires an effort value. Supplying an effort without a source preserves
+that value with unknown provenance; it does not establish a configured setting.
+Use `--requested-reasoning-effort` to retain the request separately, especially
+when the client reports a different value, for example:
+`--requested-reasoning-effort xhigh --reasoning-effort high --reasoning-effort-source client-reported`.
+The request alone may be recorded while actual effort stays null/unknown. When
+the source is `requested`, both supplied request values must agree. These flags
+label the run; they neither configure the adapter nor verify its client state.
+Retain sanitized supporting evidence separately for reported or inferred values.
+New manifests, per-case metrics, and score reports carry these labels. Historical
+manifests with absent or null provenance remain unchanged when scored; absence
+means unknown, with no retrospective default or inference added.
 
 Preparation hashes the cases, separate expectations, document bundle, catalog,
 and prompts. Execution rejects changed documents/prompts and existing results;
@@ -186,8 +202,12 @@ all GitHub APIs, CI, review submission, rebase, or release execution. Readback t
 prove the fake tool returned stored state, not that a model understood it. Compare
 model workflows only after recording adapter/client/model configuration and the
 selected policy arm. The run command accepts optional `--model`,
-`--model-identity-source`, `--reasoning-effort`, `--client-version`, and `--policy-arm`
-labels; unknowns stay null, and labels are operator-supplied. This fixture does not
+`--model-identity-source`, `--reasoning-effort`, `--reasoning-effort-source`,
+`--requested-reasoning-effort`, `--client-version`, and `--policy-arm` labels.
+Effort fields follow the decision-run contract above and are retained in the
+manifest, execution result, and score report. Unknown values stay null; new effort
+provenance defaults to `unknown`, and missing/null historical provenance is
+preserved. All labels are operator-supplied. This fixture does not
 inject skill documents or verify that an adapter supplied its labelled policy.
 Its JSON state is intentionally a single-writer fixture; it does not serialize
 multiple publishers or validate a distributed publication lock.

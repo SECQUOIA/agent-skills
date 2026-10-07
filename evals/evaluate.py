@@ -9,10 +9,15 @@ import re
 import subprocess
 import time
 
+if __package__:
+    from . import effort_metadata
+else:
+    import effort_metadata
+
 ROOT = Path(__file__).resolve().parents[1]
 FORMAT = 3
 LABELS = {"model", "reasoning_effort", "client_version", "trial", "adapter_kind",
-          "model_identity_source"}
+          "model_identity_source", "reasoning_effort_source", "requested_reasoning_effort"}
 
 
 def read_json(path):
@@ -83,6 +88,7 @@ def validate_trial(output):
     manifest = read_json(output / "manifest.json")
     if manifest.get("format_version") != FORMAT:
         raise ValueError("Unsupported trial format; prepare a new trial")
+    effort_metadata.validate(manifest)
     ids = case_ids([{"id": value} for value in manifest["cases"]])
     workspace = output / "workspace"
     if not workspace.is_dir() or workspace.is_symlink():
@@ -158,7 +164,7 @@ def prepare(root, output, arm, cases, ref=None, expectations=None):
         "case_sha256": digest({case["id"]: case for case in cases}),
         "expectations_sha256": digest(selected_expectations),
         "routing_scored": arm != "no-policy",
-        "model": None, "reasoning_effort": None, "client_version": None,
+        "model": None, "client_version": None, **effort_metadata.labels(),
         "adapter_kind": None, "model_identity_source": None,
         "harness_version": str(FORMAT), "trial": None,
     }
@@ -214,10 +220,12 @@ def run(output, runner, labels, timeout):
         raise ValueError("Unexpected runtime label")
     if labels.get("adapter_kind") not in {"model", "scripted", "manual"}:
         raise ValueError("Declare adapter_kind as model, scripted, or manual")
+    updated_manifest = dict(manifest, **labels)
+    effort_metadata.validate(updated_manifest)
     if any((output / (case_id + suffix)).exists()
            for case_id in manifest["cases"] for suffix in (".response.json", ".metrics.json")):
         raise ValueError("Trial results exist; prepare a new trial instead of relabeling or overwriting")
-    manifest.update(labels)
+    manifest = updated_manifest
     write_json(output / "manifest.json", manifest)
     for case_id in manifest["cases"]:
         target = output / (case_id + ".response.json")
@@ -240,6 +248,7 @@ def run(output, runner, labels, timeout):
         write_json(output / (case_id + ".metrics.json"), {
             "elapsed_seconds": time.monotonic() - start,
             "tokens": None, "tool_calls": None,
+            **{key: manifest[key] for key in effort_metadata.FIELDS if key in manifest},
         })
 
 
@@ -255,7 +264,7 @@ def main():
     execute = sub.add_parser("run")
     execute.add_argument("--output", type=Path, required=True)
     execute.add_argument("--model")
-    execute.add_argument("--reasoning-effort")
+    effort_metadata.add_arguments(execute)
     execute.add_argument("--client-version")
     execute.add_argument("--adapter-kind", choices=["model", "scripted", "manual"], required=True)
     execute.add_argument("--model-identity-source")
@@ -278,7 +287,10 @@ def main():
         if args.timeout <= 0 or args.trial < 1:
             parser.error("timeout and trial must be positive")
         labels = {key: getattr(args, key) for key in LABELS}
-        run(args.output.resolve(), runner, labels, args.timeout)
+        try:
+            run(args.output.resolve(), runner, labels, args.timeout)
+        except ValueError as error:
+            parser.error(str(error))
     else:
         if (args.output / "scores.json").exists():
             parser.error("scores already exist; retain historical grading and prepare a new trial")
