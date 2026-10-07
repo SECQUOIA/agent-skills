@@ -22,7 +22,13 @@ relate it to the legacy concept with `isNewVersionOf`, to the tag with
 evergreen concept and confirm the legacy integration cannot also deposit it.
 
 Read back public metadata, files, checksums, and both concept/version DOI redirects
-without authentication. If the record and files are public but DOI.org returns
+without authentication. Compare the record's license identifier with the tagged
+source's license files. Report a mismatch separately from verified software
+installation. Correcting published archive metadata requires verified deposit
+access and authorization; do not change the source license merely to match
+inherited archive metadata.
+
+If the record and files are public but DOI.org returns
 404, report **published; DOI verification pending**. Check DataCite registration
 and retry the same identifiers in bounded checks. Keep DOI-dependent completion
 criteria open; do not republish or upload another version to retry resolution.
