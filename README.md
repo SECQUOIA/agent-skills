@@ -113,6 +113,12 @@ identify the new issue or PR. Response text is inspected transiently. The classi
 does not cover arbitrary HTTP clients, generated commands, or every shell wrapper;
 its flags are workflow observations, not a security boundary or model failure rate.
 
+The same handlers also collect separate audit-only observations of recognized
+`gh` mutations and literal `git push` attempts. These do not assess publication
+authority or add blocking, even in enforce mode. See the
+[worker publication audit](skills/apply-conversation-lessons/references/worker-publication-audit.md)
+for role provenance, coverage, and the `report --remote-write-audit --json` view.
+
 ## Encounter evidence and model comparisons
 
 The SQLite ledger defaults to

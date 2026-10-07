@@ -454,6 +454,25 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
             updated_at TEXT NOT NULL,
             PRIMARY KEY (session_id, tool_use_id)
         );
+
+        -- Attempts are observations, not evidence about publication authority.
+        -- Keep them outside encounter opportunities/violations and lesson counts.
+        CREATE TABLE IF NOT EXISTS remote_write_observations (
+            id INTEGER PRIMARY KEY,
+            observed_at TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            agent_scope TEXT NOT NULL,
+            tool_use_id TEXT,
+            agent TEXT NOT NULL,
+            reported_role TEXT NOT NULL,
+            role_source TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            skill_revision TEXT NOT NULL,
+            runtime_json TEXT NOT NULL,
+            UNIQUE (session_id, agent_scope, tool_use_id, operation)
+        );
+        CREATE INDEX IF NOT EXISTS remote_write_observations_time
+            ON remote_write_observations(observed_at);
         """)
     with _write_transaction(connection):
         for table in ("encounters", "encounter_observations"):
@@ -490,6 +509,10 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
             connection.execute(
                 f"DELETE FROM {table} WHERE updated_at < ?", (stale_cutoff,)
             )
+        connection.execute(
+            "DELETE FROM remote_write_observations WHERE observed_at < ?",
+            (stale_cutoff,),
+        )
     return connection
 
 
@@ -870,6 +893,52 @@ def _runtime_report(
             "observations are classifier coverage gaps and excluded from passed, "
             "prevented, and escaped behavior counts."
         ),
+    }
+
+
+def report_remote_write_observations(
+    connection: sqlite3.Connection | None,
+    *,
+    since_days: int = DEFAULT_REPORT_DAYS,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Report audit attempts separately, including read-only legacy databases."""
+    observations = []
+    if connection is not None and connection.execute(
+        "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'remote_write_observations'"
+    ).fetchone():
+        cutoff = isoformat((now or utc_now()) - timedelta(days=since_days))
+        for row in connection.execute(
+            """
+            SELECT agent, reported_role, role_source, operation, skill_revision,
+                runtime_json, COUNT(*) AS attempts,
+                MIN(observed_at) AS first_seen, MAX(observed_at) AS last_seen
+            FROM remote_write_observations WHERE observed_at >= ?
+            GROUP BY agent, reported_role, role_source, operation, skill_revision, runtime_json
+            ORDER BY agent, reported_role, operation, skill_revision, runtime_json
+            """,
+            (cutoff,),
+        ).fetchall():
+            observation = dict(row)
+            observation["runtime"] = json.loads(observation.pop("runtime_json"))
+            observations.append(observation)
+    return {
+        "authorization_assessed": False,
+        "coverage_note": (
+            "Audit only: recognized PreToolUse attempts, not completed writes or "
+            "authorization violations. Worker publication may be explicitly authorized. "
+            "Claude agent_id is reported worker metadata, not verified authority; "
+            "other clients and missing metadata have unknown role. Literal git pushes "
+            "and existing gh classifier coverage only; scripts, aliases, dynamic git "
+            "arguments, heredoc body expansions, unobserved tool channels and "
+            "unsupported forms are not covered. Audit preprocessing excludes comments "
+            "and simple heredoc data; unsupported heredoc syntax skips recognition. "
+            "No observations does not establish absence of writes. Attempts with a tool "
+            "ID deduplicate per session/agent/operation; missing IDs cannot deduplicate. "
+            f"Observations retained for {HOOK_STATE_RETENTION_DAYS} days; they never "
+            "contribute to lesson eligibility or change hook decisions."
+        ),
+        "observations": observations,
     }
 
 
@@ -3657,6 +3726,221 @@ def _command_from_payload(payload: dict[str, Any]) -> str:
     return str(tool_input.get("command") or tool_input.get("cmd") or "")
 
 
+def _literal_git_push(arguments: list[_ShellWord]) -> bool:
+    """Recognize common literal pushes, excluding dry runs and help requests."""
+    if any(not word.literal for word in arguments):
+        return False
+    tokens = [word.value for word in arguments]
+    index = 0
+    global_values = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
+    global_flags = {
+        "-p", "-P", "--paginate", "--no-pager", "--bare",
+        "--no-replace-objects", "--no-optional-locks", "--no-lazy-fetch",
+        "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
+        "--icase-pathspecs",
+    }
+    while index < len(tokens) and tokens[index] != "push":
+        token = tokens[index]
+        if token in global_values:
+            index += 2
+        elif token in global_flags or any(
+            token.startswith(flag + "=") for flag in global_values if flag.startswith("--")
+        ) or (token.startswith(("-C", "-c")) and len(token) > 2):
+            index += 1
+        else:
+            return False
+    if index == len(tokens):
+        return False
+    index += 1
+    dry_run = False
+    value_flags = {"--repo", "--receive-pack", "--exec", "--push-option", "--recurse-submodules", "-o"}
+    boolean_flags = {
+        "--all", "--branches", "--prune", "--mirror", "--tags", "--follow-tags",
+        "--force", "--delete", "--set-upstream", "--thin", "--no-thin",
+        "--atomic", "--no-atomic", "--porcelain", "--verbose", "--quiet",
+        "--progress", "--no-verify", "--verify", "--ipv4", "--ipv6",
+        "--force-if-includes", "--no-force-if-includes", "--no-force-with-lease",
+        "--signed", "--no-signed", "--force-with-lease",
+    }
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            break
+        if token in {"--dry-run", "--no-dry-run"}:
+            dry_run = token == "--dry-run"
+        elif token in value_flags:
+            index += 1
+            if index == len(tokens):
+                return False
+        elif token in boolean_flags or any(
+            token.startswith(flag + "=")
+            for flag in value_flags | {"--signed", "--force-with-lease"}
+            if flag.startswith("--")
+        ) or (token.startswith("-o") and len(token) > 2):
+            pass
+        elif token.startswith("-") and not token.startswith("--") and set(token[1:]) <= set("nqvufd46"):
+            dry_run = dry_run or "n" in token[1:]
+        elif token.startswith("-"):
+            return False
+        index += 1
+    return not dry_run
+
+
+def _audit_shell_text(command: str) -> str | None:
+    """Remove comments and simple heredoc data for audit recognition only.
+
+    Delimiters must be plain identifiers or wholly quoted literal words. Skip
+    unsupported/malformed heredocs rather than treating their data as commands.
+    Expansions in unquoted heredoc bodies are deliberately outside audit coverage.
+    """
+    output: list[str] = []
+    heredocs: list[tuple[str, bool]] = []
+    quote = ""
+    word_start = True
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char == "\\" and quote != "'" and index + 1 < len(command):
+            escaped = command[index + 1]
+            if escaped != "\n":
+                output.extend((char, escaped))
+                word_start = False
+            index += 2
+            continue
+        if quote:
+            output.append(char)
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            word_start = False
+        elif char == "#" and word_start:
+            end = command.find("\n", index)
+            index = len(command) if end < 0 else end
+            continue
+        elif command.startswith("<<", index):
+            # Here-strings and composite/dynamic delimiter words are unsupported.
+            match = re.match(
+                r"<<(-?)[ \t]*(?:([A-Za-z_][A-Za-z0-9_]*)|'([^'\n]+)'|\"([^\"\n]+)\")(?=$|[ \t\r\n;&|()])",
+                command[index:],
+            )
+            if match is None:
+                return None
+            delimiter = next(value for value in match.groups()[1:] if value is not None)
+            heredocs.append((delimiter, bool(match.group(1))))
+            output.append(" ")
+            word_start = True
+            index += match.end()
+            continue
+        if char == "\n" and heredocs:
+            output.append("\n")
+            word_start = True
+            index += 1
+            for delimiter, strip_tabs in heredocs:
+                while index < len(command):
+                    end = command.find("\n", index)
+                    end = len(command) if end < 0 else end
+                    line = command[index:end]
+                    index = end + (end < len(command))
+                    if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                        break
+                else:
+                    return None
+            heredocs.clear()
+            continue
+        elif not quote:
+            word_start = char in " \t\r\n;&|()<>"
+        output.append(char)
+        index += 1
+    return None if quote or heredocs else "".join(output)
+
+
+def _audit_remote_write_kinds(command: str, cwd: str, *, depth: int = 0) -> set[str]:
+    """Recognize bounded executable segments without altering gh enforcement."""
+    if depth >= MAX_NESTED_SHELL_DEPTH:
+        return set()
+    command = _audit_shell_text(command)
+    if command is None:
+        return set()
+    operations: set[str] = set()
+    words = _tokenize_shell_words(command)
+    for index, word in enumerate(words):
+        if not word.literal or _executable_shell_position(words, index) is None:
+            continue
+        executable = Path(word.value).name
+        end = next(
+            (offset for offset in range(index + 1, len(words)) if words[offset].command_boundary),
+            len(words),
+        )
+        if executable == "git" and _literal_git_push(words[index + 1 : end]):
+            operations.add("git-push")
+        if executable == "gh":
+            # Reconstruct this executable argv only; never feed heredoc/comment
+            # text or an unprocessed nested shell into the shared classifier.
+            segment = shlex.join(part.value for part in words[index:end])
+            if any(
+                op.kind == "write" and op.summary != "gh repo set-default"
+                for op in classify_gh_operations(segment, cwd)
+            ):
+                operations.add("gh-write")
+        if executable in {"bash", "dash", "ksh", "sh", "zsh"}:
+            nested = _shell_command_argument([part.value for part in words[:end]], index)
+            if nested is not None:
+                operations.update(_audit_remote_write_kinds(nested, cwd, depth=depth + 1))
+    for nested in _command_substitutions(command):
+        operations.update(_audit_remote_write_kinds(nested, cwd, depth=depth + 1))
+    return operations
+
+
+def _has_literal_git_push(command: str, *, depth: int = 0) -> bool:
+    return "git-push" in _audit_remote_write_kinds(command, os.getcwd(), depth=depth)
+
+
+def _record_remote_write_observations(
+    connection: sqlite3.Connection,
+    payload: dict[str, Any],
+    *,
+    agent: str,
+    command: str,
+    cwd: str,
+    revision: str,
+) -> None:
+    operations = _audit_remote_write_kinds(command, cwd)
+    if not operations:
+        return
+    agent_id = payload.get("agent_id")
+    has_agent_id = isinstance(agent_id, str) and bool(agent_id.strip())
+    # Claude documents agent_id on subagent tool events. A client label and
+    # payload field are observations, never a trusted publication grant. Missing
+    # metadata does not prove root identity, even though legacy activity scoping
+    # uses "root" as its default key.
+    reported_role = "worker" if agent == "claude" and has_agent_id else "unknown"
+    role_source = (
+        "claude.agent_id" if reported_role == "worker"
+        else "unvalidated-client.agent_id" if has_agent_id
+        else "missing-agent-id"
+    )
+    session_id, _, _ = _payload_context(payload)
+    agent_scope = _runtime_id("agent", agent_id) if has_agent_id else "unknown"
+    runtime = json.dumps(_payload_runtime(payload), sort_keys=True)
+    for operation in sorted(operations):
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO remote_write_observations (
+                observed_at, session_id, agent_scope, tool_use_id, agent,
+                reported_role, role_source, operation, skill_revision, runtime_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                isoformat(utc_now()), session_id, agent_scope,
+                _tool_use_id(payload) or None, agent, reported_role, role_source,
+                operation, revision or skill_revision(), runtime,
+            ),
+        )
+
+
 def _pre_tool_use(
     connection: sqlite3.Connection,
     payload: dict[str, Any],
@@ -3665,9 +3949,10 @@ def _pre_tool_use(
     mode: str,
 ) -> dict[str, Any] | None:
     session_id, cwd, _ = _payload_context(payload)
+    command = _command_from_payload(payload)
     writes = [
         op
-        for op in classify_gh_operations(_command_from_payload(payload), cwd)
+        for op in classify_gh_operations(command, cwd)
         if op.kind == "write"
     ]
     revision = skill_revision() if writes else ""
@@ -3676,6 +3961,10 @@ def _pre_tool_use(
         # connect-time migration. Absorb them under the same writer lock as
         # this event so its state transition cannot race past pending work.
         _migrate_legacy_hook_state(connection)
+        _record_remote_write_observations(
+            connection, payload, agent=agent, command=command, cwd=cwd,
+            revision=revision,
+        )
         turn_id = _turn_id(connection, payload, remember_tool=True)
         violations = [
             op
@@ -4457,6 +4746,19 @@ def _command_record(args: argparse.Namespace) -> int:
 
 def _command_report(args: argparse.Namespace) -> int:
     with report_database(args.state_dir) as connection:
+        if getattr(args, "remote_write_audit", False):
+            audit = report_remote_write_observations(connection, since_days=args.since_days)
+            if args.json:
+                print(json.dumps(audit, indent=2))
+            else:
+                print(audit["coverage_note"])
+                for row in audit["observations"]:
+                    print(
+                        f"{row['agent']} role={row['reported_role']} "
+                        f"source={row['role_source']}: {row['attempts']} "
+                        f"{row['operation']} attempts; revision={row['skill_revision']}"
+                    )
+            return 0
         if connection is None:
             rows = []
         else:
@@ -4555,6 +4857,10 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--min-encounters", type=int, default=DEFAULT_MIN_ENCOUNTERS)
     report.add_argument("--state-dir")
     report.add_argument("--json", action="store_true")
+    report.add_argument(
+        "--remote-write-audit", action="store_true",
+        help="show separate remote-write attempt observations, without authorization judgments",
+    )
     report.set_defaults(function=_command_report)
 
     hook = subparsers.add_parser(

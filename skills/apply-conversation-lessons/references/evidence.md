@@ -22,6 +22,12 @@ escaped deterministic mistakes may call for enforcement or a classifier repair,
 not more prose. The ledger's two GitHub-write rules do not measure review quality,
 scope judgment, or overall task success. Its counts are not model failure rates.
 
+For worker publication diagnostics, use the separate
+[remote-write audit](worker-publication-audit.md). It records recognized attempts,
+not unauthorized or completed writes; explicit publisher handoffs may permit a
+worker to write. Unknown client role metadata remains unknown. These observations
+do not enter violation counts or the recurrence threshold.
+
 For a model-upgrade comparison, keep user requests, organization policy, fixtures,
 tool permissions, and grading criteria constant. Compare current instructions,
 the candidate, and a minimal policy baseline. Record model, effort, client version,
