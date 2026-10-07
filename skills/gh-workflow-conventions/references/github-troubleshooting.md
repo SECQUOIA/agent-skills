@@ -20,6 +20,7 @@ universal requirement. Do not change global configuration merely to inspect a PR
 | EOF/timeout/reset after mutation dispatch | Apply [ambiguous-outcome readback](github-writes.md) before retrying. If a body-file PATCH is proven unapplied, a JSON `--input` payload is a suitable equivalent. |
 | Readback query fails after a successful write | Repair the query; do not resubmit the write. |
 | Empty completed-job logs | Fetch `actions/jobs/<job_id>/logs` directly; confirm nonempty output before absence claims. Running jobs may not expose complete logs yet. |
+| GitHub rate-limit response | Follow [rate-limit recovery](#rate-limits); a generic 403 alone does not establish throttling. |
 | DOI redirects to a publisher that returns 403/429 | Use [scientific verification](scientific-verification.md) to distinguish a valid DOI mapping from blocked automated HTML access; do not report the DOI broken from that final response alone. |
 
 A permission-limited branch-protection 404/403 does not prove an unprotected
@@ -32,3 +33,22 @@ imply a standalone `jq` executable exists. If a wrapper drops stdin, run a scrip
 file instead of a heredoc. If an approval mechanism rejects a compound command,
 use separate reviewable operations with the same semantics; do not disguise a
 rejected operation or widen its permissions. See [environment troubleshooting](environment-troubleshooting.md).
+
+## Rate limits
+
+Coordinate callers sharing an account or token: avoid duplicate polling and
+serialize bursts of mutations. Published concurrency and content-creation limits
+are ceilings, not a per-worker allowance or guaranteed available capacity.
+
+On an identified rate-limit response, honor `retry-after`. If the primary budget
+is exhausted (`x-ratelimit-remaining: 0`), wait until `x-ratelimit-reset`; respect
+both waits when present. For a secondary limit without either applicable wait,
+wait at least one minute. Repeated secondary limits require increasing exponential
+delays and a bounded retry count within the workflow's remaining wait budget.
+If the wait exceeds that budget, report the pending gate and retry timing rather
+than continuing requests. Reconcile an ambiguously dispatched write before any
+retry under the shared write rules. Share the backoff with other callers so a
+different worker does not immediately repeat the request.
+
+See GitHub's [rate-limit response guidance](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#exceeding-the-rate-limit)
+and [request best practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api).

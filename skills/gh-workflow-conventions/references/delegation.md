@@ -1,8 +1,8 @@
 # Optional delegation and concurrent work
 
-Read before delegating part of a workflow or coordinating with another agent on
-the same target. For solo work, execute the owning skill normally: no worker
-records, role setup, or extra approvals are required. Use helpers when useful and
+Read before delegating part of a workflow, receiving an assignment from another
+agent, or coordinating concurrent work. For solo work, execute the owning skill
+normally: no worker records, role setup, or extra approvals are required. Use helpers when useful and
 within the user's scope; honor a request to work alone. If helpers are unavailable,
 continue sequentially where consistent with the request and disclose any explicitly
 requested delegation that could not be supplied.
@@ -20,17 +20,27 @@ ordinary messages suffice, without a required schema or new tracking service:
 | Assignment | What the worker needs |
 |---|---|
 | Target and evidence | Verified repository, issue/PR, pinned base/head or source tree, and the concrete question or change |
+| Instructions | Resolved path to the owning `SKILL.md` (or provider resource identifier), available in the worker's environment |
 | Authority | User limits, allowed reads/execution/local edits, permitted paths, and any explicitly authorized external surface |
 | Resources | Absolute working directory, owned branch/ref and artifacts, shared environment/output restrictions, and integration owner |
 | Completion | Expected findings or patch, checks/evidence, dependencies, stopping conditions, and remaining relevant workflow budget |
 
-Load the owning skill and applicable references in the worker's context; do not
-assume it inherited every decision. The assignment narrows the skill's ordinary
-full-workflow authority. An inspection worker using `gh-review-pr` returns findings,
+Load the named skill and applicable references in the worker's context; do not
+assume catalogue visibility or inherited decisions. If its source is unavailable,
+report that missing dependency instead of silently substituting another workflow.
+The assignment narrows the skill's ordinary full-workflow authority.
+An inspection worker using `gh-review-pr` returns findings,
 not a posted review. A local implementation worker using `gh-issue-to-pr` returns
 changes and evidence, not a pushed branch or PR. Do not invent remote results to
 satisfy a later phase. Return pending actions to the coordinator, and resume a
 dependent phase only after the required real result has been verified.
+
+Match tool permissions to the assignment where the runtime supports it: a worker
+may need local editing and tests without remote-write capabilities. Give publication
+capability only to its designated owner. Use evaluations of the actual model,
+client, instructions, and permissions to guide delegation; a model name or a small
+passing sample does not establish reliable execution. These limits govern actions,
+not access to the skill's instructions. Keep the same authority boundary across models.
 
 Nested workers inherit the same limits and respect existing resource ownership;
 assign mutable resources before re-delegating. Stay within the assignment and
@@ -73,6 +83,10 @@ retained commit(s) or patch and base, changed paths, and artifact locations. For
 checks include the command, outcome, tested tree/patch and environment identity,
 and limitations. Distinguish proposed, performed, and verified external actions.
 A read-only finding needs no invented commit or test result.
+
+For scripted fan-out, agree on a structured return using these same fields;
+ordinary messages remain the default. Mark unavailable evidence as unknown and
+pending actions as pending rather than filling fields with invented results.
 
 Before integration, verify the returned scope and source identity, inspect the
 actual patch, and ensure relevant writers and their commands are quiescent. Keep

@@ -25,11 +25,11 @@ Read [feedback triage](references/feedback-triage.md) when feedback overlaps, pr
 
 If there are no feedback targets, report the empty pass without posting a “nothing to address” comment. If targets exist but all need explanation rather than code, follow the publication path without manufacturing a commit.
 
-## Verify and push
+## Verify changes
 
 Use repository tests and conventions proportional to the changed behavior. For a bug, prefer a reproducing regression test and confirm the relevant failure/fix; reuse trustworthy existing evidence when its source, inputs, and environment remain valid. For optional mutation proof, first read [mutation safety](../gh-workflow-conventions/references/mutation-testing.md). Do not repeat mutation batteries or broad suites solely because another review round occurred. Keep checks honest: do not weaken tests to make a change pass.
 
-Before staging, inspect the full PR diff for unintended scope, stale docs, generated state, and leftover formatting-only files. Commit only intended files and push append-only to the verified head branch. Read [CI observation](../gh-workflow-conventions/references/ci-and-checks.md): wait within its bound, then read structured checks for the actual new PR head. A watch exit code is not proof of green CI. If a fork push is not yet reflected in the PR object, poll until the reported head matches before using head markers.
+Before staging, inspect the full PR diff for unintended scope, stale docs, generated state, and leftover formatting-only files. Commit only intended files. An assigned worker without the publication handoff returns local changes, check evidence, and prepared resolutions to its coordinator. The designated publisher pushes append-only to the verified head branch and reads [CI observation](../gh-workflow-conventions/references/ci-and-checks.md): wait within its bound, then read structured checks for the actual new PR head. A watch exit code is not proof of green CI. If a fork push is not yet reflected in the PR object, poll until the reported head matches before using head markers.
 
 Diagnose actual failures attributable to the changes within the authorized scope. When checks remain queued/running at the observation bound, complete authorized resolution reporting with the precise pending state; do not call the PR green. Re-read `reviewDecision`, draft/merge state, and any relevant enforced gates after the push. Addressed code does not clear a standing `CHANGES_REQUESTED`.
 

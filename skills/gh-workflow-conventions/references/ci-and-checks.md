@@ -29,6 +29,14 @@ An inert suite is not code CI: establish whether a code producer or required
 context should exist before classifying absence. Missing steps in an in-progress
 job are not evidence those steps were omitted.
 
+When several agents need the same CI result, designate one watcher for the
+repository/head and relevant run set; the coordinator may assign that read-only
+role to a helper. Share observations with head, run/attempt, and observation time
+instead of starting duplicate polls. A changed head or rerun needs updated
+evidence. The publisher still refreshes live gates immediately before acting.
+Use [rate-limit recovery](github-troubleshooting.md#rate-limits) when throttled;
+do not multiply retries across workers.
+
 ## Events and actual execution
 
 - After draft → ready, inspect whether `ready_for_review` is a configured trigger.

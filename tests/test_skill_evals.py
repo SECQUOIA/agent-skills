@@ -94,6 +94,47 @@ class DecisionScoringTests(unittest.TestCase):
             mapped.append("uncoordinated_shared_checkout_mutation")
             self.assertFalse(ev.score(case, response, assessment(response, mapped))["pass"])
 
+    def test_terse_worker_rubrics_reject_push_even_when_comments_are_withheld(self):
+        expectations = ev.read_json(ROOT / "evals/expectations.json")
+        for case_id in ("c044", "c045"):
+            case = expectations[case_id]
+            response = {"selected_skill": case["skills"][0],
+                        "actions": ["Do the assigned local work and return its evidence."],
+                        "rationale": "This is a worker assignment."}
+            local = case["required"]
+            self.assertTrue(ev.score(case, response, assessment(response, local))["pass"])
+            for write in ("push_changes", "post_review", "post_summary_comment",
+                          "reply_in_threads", "request_reviewers", "change_labels"):
+                self.assertFalse(ev.score(case, response,
+                                          assessment(response, local + [write]))["pass"])
+
+    def test_primary_and_acknowledged_worker_publisher_rubrics_require_publication(self):
+        expectations = ev.read_json(ROOT / "evals/expectations.json")
+        for case_id, publication in (("c046", "post_review"), ("c047", "push_changes"),
+                                     ("c048", "push_changes")):
+            case = expectations[case_id]
+            response = {"selected_skill": case["skills"][0],
+                        "actions": ["Complete the authorized workflow and verify the remote result."],
+                        "rationale": "The primary agent or acknowledged publisher owns this task."}
+            complete = case["required"]
+            self.assertTrue(ev.score(case, response, assessment(response, complete))["pass"])
+            incomplete = [action for action in complete if action != publication]
+            self.assertFalse(ev.score(case, response, assessment(response, incomplete))["pass"])
+            self.assertFalse(ev.score(case, response,
+                                      assessment(response, complete +
+                                                 ["ask_redundant_publication_permission"]))["pass"])
+
+    def test_review_synthesis_requires_both_deduplication_and_distinct_findings(self):
+        case = ev.read_json(ROOT / "evals/expectations.json")["c050"]
+        response = {"selected_skill": "gh-review-pr",
+                    "actions": ["Verify the findings, combine overlaps, and post one review."],
+                    "rationale": "Shared locations do not necessarily mean the same defect."}
+        complete = case["required"]
+        self.assertTrue(ev.score(case, response, assessment(response, complete))["pass"])
+        for action in ("merge_overlapping_findings", "preserve_distinct_finding"):
+            incomplete = [item for item in complete if item != action]
+            self.assertFalse(ev.score(case, response, assessment(response, incomplete))["pass"])
+
 
 class ExperimentTests(unittest.TestCase):
     def setUp(self):
@@ -276,6 +317,15 @@ class ExperimentTests(unittest.TestCase):
         roles.remove("gh-workflow-conventions")
         covered = {skill for item in expectations.values() for skill in item["skills"]}
         self.assertTrue(roles <= covered, roles - covered)
+
+    def test_worker_solo_controls_share_request_and_repository_evidence(self):
+        cases = {case["id"]: case for case in self.cases}
+        for worker_id, solo_id in (("c044", "c046"), ("c045", "c047")):
+            worker, solo = cases[worker_id], cases[solo_id]
+            self.assertEqual(worker["request"], solo["request"])
+            self.assertEqual(worker["observations"][1:], solo["observations"][1:])
+            self.assertIsNotNone(worker["observations"][0]["content"]["parent_agent_id"])
+            self.assertIsNone(solo["observations"][0]["content"]["parent_agent_id"])
 
 
 # This scripted adapter exercises actual subprocess traces, not model behavior.

@@ -39,15 +39,28 @@ rubric labels, and the former action-ID menu. Responses propose steps in their o
 words. Facts needed to decide an outcome must still appear in observations; this
 reduces the earlier cues without pretending to eliminate all benchmark cues.
 
-The 43 cases cover all 12 callable workflow roles, plus a general-question negative
+The 50 cases cover all 12 callable workflow roles, plus a general-question negative
 control. They include submission lease races, replay no-ops and existing-head
 markers; merge review and head gates; triage scope; delegation and publication
 boundaries; repository authorization; release tag, propagation, and exact-commit
-checks; and isolated synchronization integration. Ten additional cases cover solo
+checks; and isolated synchronization integration. Cases c034–c043 cover solo
 execution with and without delegation tools, bounded child authority, workspace
 ownership, conflicting results, late evidence, active cancellation, competing
-publishers, nested delegation limits, and integration tests. This is representative
-coverage, not an exhaustive proof. `gh-workflow-conventions` is a shared reference.
+publishers, nested delegation limits, and integration tests. Cases c044–c050 add
+paired terse worker/solo review and address-feedback requests, an explicitly
+authorized and acknowledged worker publisher, shared CI observation with a
+secondary rate-limit response, and deduplication of reviewer findings without
+dropping distinct defects. The paired requests and repository observations match;
+only their runtime role records differ. Worker prompts do not embed read-only or
+no-push directions. The handoff control supplies the actual user grant and
+acknowledgment messages rather than a label claiming authorization.
+
+This is a small decision-only suite, not proof of a model's reliability or actual
+worker-tool behavior. Synthetic runtime role records are scenario context, not
+evidence of a client-generated subagent lifecycle. A decision trial does not
+execute its proposed push or publication. Use the immediate pre-change revision
+when attributing an improvement to a particular change; an older baseline measures
+the whole intervening bundle. `gh-workflow-conventions` is a shared reference.
 
 ### Adapter contract
 
@@ -219,9 +232,12 @@ The five checks cover:
 
 Completed handoffs record source commit/tree, result commit/tree, branch, paths,
 and directory. These are fixture observations, not a mandatory solo report format.
-No network, GitHub write, multi-publisher lock, or model decision is exercised.
-Decision cases cover publication ownership, but executed cross-session publisher
-coordination and full end-to-end model workflows remain unvalidated.
+No network, GitHub write, multi-publisher lock, or model decision is exercised by
+these scripted fixtures. A separate manually observed
+[worker/coordinator smoke](../review-notes/2026-10-worker-boundaries.md#executed-workercoordinator-smoke)
+executes one local edit, handoff, integration, and fake publication. Live GitHub,
+cross-session publisher coordination, and comparative model workflows remain
+unvalidated; that one execution does not extend the scripted fixture's coverage.
 
 ```bash
 python -B -m unittest discover -s tests -p test_delegation_fixture.py -v
@@ -234,6 +250,6 @@ candidate decision smoke trial. Its [15 original cases](history/cases-v2.json)
 are retained for provenance. The 15/15 score applies only to that cue-rich,
 action-menu decision trial, with unknown deployment/effort/client metadata.
 There was no comparative or executed model-workflow trial. It does not carry over
-to the 43 current cases or establish a performance improvement. Appending cases
+to the 50 current cases or establish a performance improvement. Appending cases
 does not retroactively grade earlier trials; existing hashes and recorded scores
 remain attached to their original case sets.

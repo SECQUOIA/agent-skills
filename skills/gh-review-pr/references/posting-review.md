@@ -12,6 +12,13 @@ Use `<!-- gh-review-pr:sha=<HEAD_SHA> -->` in the body. An exact existing sentin
 
 ## Construct one review
 
+When multiple helpers contribute, reconcile their findings into one inventory
+before choosing the verdict. Merge reports of the same defect, retain distinct
+defects even at the same location, and resolve conflicting severity or remedy
+claims against the reviewed source and evidence. Preserve each finding's evidence
+and limitations; derive counts and stable markers from the reconciled inventory.
+Helpers return findings to the designated publisher rather than posting separately.
+
 Build one JSON object with a serializer: `commit_id`, `event`, `body`, and `comments` (empty for a body-only review). Submit with `gh api repos/{owner}/{repo}/pulls/{number}/reviews --method POST --input <json-file>`.
 
 Validate every inline path/line/side against the exact hunks GitHub exposes, not simply an existing head line or a non-null patch. Use a nearby changed line and identify the actual location in prose when needed. Put binary/large-file findings with no exposed hunk into the marked review body. Never nest fences inside a suggestion block.

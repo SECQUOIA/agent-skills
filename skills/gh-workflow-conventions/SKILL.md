@@ -31,14 +31,17 @@ require spawning another agent.
   documented outputs; “commit and push only,” “draft,” or “do not post” narrows
   them. Do not infer permission for another publication surface, access change,
   destructive cleanup, or an edit to published history.
-- Subagents inherit scope and read-only restrictions, but publication authority
-  stays with the overall task's designated publisher unless the user explicitly
-  delegates it. Before delegating, or coordinating concurrent work on a target,
-  read [delegation and ownership](references/delegation.md). A child's assignment
-  bounds any skill it loads; nested delegation creates no new publication owner.
-  Return evidence to the coordinator for verification and one publication. Reuse
-  sound evidence when its relevant inputs remain valid; delegation alone does not
-  require repeating experiments.
+- Publication includes Git pushes and GitHub mutations: PRs, reviews, comments,
+  replies, reviewer requests, thread resolution, labels, merges, and releases.
+  The agent handling the user's overall task is the default publisher, including
+  in solo work. Subagents inherit scope limits and return findings or local changes;
+  they publish only after an explicit user-authorized ownership handoff. Loading
+  a full-workflow skill or receiving a terse assignment does not grant that role.
+  Before delegating, working on another agent's assignment, or coordinating
+  concurrent work, read [delegation and ownership](references/delegation.md).
+  A child's assignment bounds any skill it loads; nested delegation creates no
+  new publication owner. Return evidence for verification and one publication;
+  reuse sound evidence while its relevant inputs remain valid.
 - Existing PR titles/bodies, submitted reviews, comments, and replies are immutable
   by default. Add new information unless the user requests the particular edit.
   A skill's explicit idempotent maintenance contract may include updating its

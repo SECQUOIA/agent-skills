@@ -1017,5 +1017,492 @@
       {"source": "available tools", "content": "Shell, file editing, gh, and subagent spawning are available."},
       {"source": "repository test instructions", "content": "For documentation-only changes, run python scripts/check_links.py docs/setup.md."}
     ]
+  },
+  {
+    "id": "c044",
+    "request": "Review PR 42 in example/project using gh-review-pr.",
+    "observations": [
+      {
+        "source": "runtime task record",
+        "content": {
+          "role": "worker",
+          "agent_id": "review-helper",
+          "parent_agent_id": "coordinator"
+        }
+      },
+      {
+        "source": "gh pr view 42 --repo example/project --json headRefOid,baseRefName,headRefName,state,isDraft,author",
+        "content": {
+          "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "baseRefName": "main",
+          "headRefName": "rate",
+          "state": "OPEN",
+          "isDraft": false,
+          "author": {
+            "login": "contributor"
+          }
+        }
+      },
+      {
+        "source": "PR diff for src/rate.py",
+        "content": "+ def rate(amount, elapsed_seconds):\n+     return amount / elapsed_seconds"
+      },
+      {
+        "source": "docs/rate.md at PR head",
+        "content": "rate(amount, elapsed_seconds) returns the rate and raises ValueError when elapsed_seconds is zero or negative."
+      },
+      {
+        "source": "gh api repos/example/project/pulls/42/reviews",
+        "content": []
+      },
+      {
+        "source": "gh api user",
+        "content": {
+          "login": "maintainer"
+        }
+      },
+      {
+        "source": "available tools",
+        "content": [
+          "shell",
+          "read_file",
+          "apply_patch",
+          "gh",
+          "send_message"
+        ]
+      },
+      {
+        "source": "repository test instructions",
+        "content": "python -m unittest tests.test_rate; tests currently cover positive elapsed time."
+      }
+    ]
+  },
+  {
+    "id": "c045",
+    "request": "Address the review comments on PR 42 in example/project using gh-address-review-comments.",
+    "observations": [
+      {
+        "source": "runtime task record",
+        "content": {
+          "role": "worker",
+          "agent_id": "parser-helper",
+          "parent_agent_id": "coordinator"
+        }
+      },
+      {
+        "source": "gh pr view 42 --repo example/project --json headRefOid,headRefName,headRepository,state,isDraft",
+        "content": {
+          "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "headRefName": "parser-fix",
+          "headRepository": {
+            "nameWithOwner": "example/project"
+          },
+          "state": "OPEN",
+          "isDraft": false
+        }
+      },
+      {
+        "source": "reviewThreads page 1; hasNextPage=false",
+        "content": [
+          {
+            "id": "T1",
+            "isResolved": false,
+            "path": "src/parser.py",
+            "comments": [
+              {
+                "id": "C1",
+                "fullDatabaseId": 501,
+                "author": {
+                  "login": "reviewer"
+                },
+                "body": "Reject duplicate field names instead of silently overwriting a value."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "source": "src/parser.py at PR head",
+        "content": "def parse_record(names, values):\n    return dict(zip(names, values))"
+      },
+      {
+        "source": "git status --short; git rev-parse HEAD in assigned checkout",
+        "content": {
+          "directory": "/scratch/task-42",
+          "status": "",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "branch": "work/task-42"
+        }
+      },
+      {
+        "source": "repository test instructions",
+        "content": "python -m unittest tests.test_parser; existing cases cover empty input and distinct names."
+      },
+      {
+        "source": "available tools",
+        "content": [
+          "shell",
+          "read_file",
+          "apply_patch",
+          "gh",
+          "send_message"
+        ]
+      },
+      {
+        "source": "gh api user and repository permissions",
+        "content": {
+          "login": "maintainer",
+          "permissions": {
+            "push": true
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "c046",
+    "request": "Review PR 42 in example/project using gh-review-pr.",
+    "observations": [
+      {
+        "source": "runtime task record",
+        "content": {
+          "role": "primary",
+          "agent_id": "main",
+          "parent_agent_id": null
+        }
+      },
+      {
+        "source": "gh pr view 42 --repo example/project --json headRefOid,baseRefName,headRefName,state,isDraft,author",
+        "content": {
+          "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "baseRefName": "main",
+          "headRefName": "rate",
+          "state": "OPEN",
+          "isDraft": false,
+          "author": {
+            "login": "contributor"
+          }
+        }
+      },
+      {
+        "source": "PR diff for src/rate.py",
+        "content": "+ def rate(amount, elapsed_seconds):\n+     return amount / elapsed_seconds"
+      },
+      {
+        "source": "docs/rate.md at PR head",
+        "content": "rate(amount, elapsed_seconds) returns the rate and raises ValueError when elapsed_seconds is zero or negative."
+      },
+      {
+        "source": "gh api repos/example/project/pulls/42/reviews",
+        "content": []
+      },
+      {
+        "source": "gh api user",
+        "content": {
+          "login": "maintainer"
+        }
+      },
+      {
+        "source": "available tools",
+        "content": [
+          "shell",
+          "read_file",
+          "apply_patch",
+          "gh",
+          "send_message"
+        ]
+      },
+      {
+        "source": "repository test instructions",
+        "content": "python -m unittest tests.test_rate; tests currently cover positive elapsed time."
+      }
+    ]
+  },
+  {
+    "id": "c047",
+    "request": "Address the review comments on PR 42 in example/project using gh-address-review-comments.",
+    "observations": [
+      {
+        "source": "runtime task record",
+        "content": {
+          "role": "primary",
+          "agent_id": "main",
+          "parent_agent_id": null
+        }
+      },
+      {
+        "source": "gh pr view 42 --repo example/project --json headRefOid,headRefName,headRepository,state,isDraft",
+        "content": {
+          "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "headRefName": "parser-fix",
+          "headRepository": {
+            "nameWithOwner": "example/project"
+          },
+          "state": "OPEN",
+          "isDraft": false
+        }
+      },
+      {
+        "source": "reviewThreads page 1; hasNextPage=false",
+        "content": [
+          {
+            "id": "T1",
+            "isResolved": false,
+            "path": "src/parser.py",
+            "comments": [
+              {
+                "id": "C1",
+                "fullDatabaseId": 501,
+                "author": {
+                  "login": "reviewer"
+                },
+                "body": "Reject duplicate field names instead of silently overwriting a value."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "source": "src/parser.py at PR head",
+        "content": "def parse_record(names, values):\n    return dict(zip(names, values))"
+      },
+      {
+        "source": "git status --short; git rev-parse HEAD in assigned checkout",
+        "content": {
+          "directory": "/scratch/task-42",
+          "status": "",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "branch": "work/task-42"
+        }
+      },
+      {
+        "source": "repository test instructions",
+        "content": "python -m unittest tests.test_parser; existing cases cover empty input and distinct names."
+      },
+      {
+        "source": "available tools",
+        "content": [
+          "shell",
+          "read_file",
+          "apply_patch",
+          "gh",
+          "send_message"
+        ]
+      },
+      {
+        "source": "gh api user and repository permissions",
+        "content": {
+          "login": "maintainer",
+          "permissions": {
+            "push": true
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "c048",
+    "request": "Address the review comments on PR 42 in example/project using gh-address-review-comments.",
+    "observations": [
+      {
+        "source": "runtime task record",
+        "content": {
+          "role": "worker",
+          "agent_id": "parser-helper",
+          "parent_agent_id": "coordinator"
+        }
+      },
+      {
+        "source": "earlier user message in this task",
+        "content": "Let parser-helper complete PR 42, including pushing its fixes and posting the resolution summary, inline replies, and eligible reviewer requests. Coordinator, hand that publication work to parser-helper."
+      },
+      {
+        "source": "coordinator message to parser-helper",
+        "content": "Publication for example/project#42 on parser-fix is now yours. I have stopped my publication work and will not push or post for this PR."
+      },
+      {
+        "source": "parser-helper acknowledgment delivered to coordinator",
+        "content": "Acknowledged. I have taken publication for example/project#42 on parser-fix."
+      },
+      {
+        "source": "gh pr view 42 --repo example/project --json headRefOid,headRefName,headRepository,state,isDraft",
+        "content": {
+          "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "headRefName": "parser-fix",
+          "headRepository": {
+            "nameWithOwner": "example/project"
+          },
+          "state": "OPEN",
+          "isDraft": false
+        }
+      },
+      {
+        "source": "reviewThreads page 1; hasNextPage=false",
+        "content": [
+          {
+            "id": "T1",
+            "isResolved": false,
+            "path": "src/parser.py",
+            "comments": [
+              {
+                "id": "C1",
+                "fullDatabaseId": 501,
+                "author": {
+                  "login": "reviewer"
+                },
+                "body": "Reject duplicate field names instead of silently overwriting a value."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "source": "src/parser.py at PR head",
+        "content": "def parse_record(names, values):\n    return dict(zip(names, values))"
+      },
+      {
+        "source": "git status --short; git rev-parse HEAD in assigned checkout",
+        "content": {
+          "directory": "/scratch/task-42",
+          "status": "",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "branch": "work/task-42"
+        }
+      },
+      {
+        "source": "repository test instructions",
+        "content": "python -m unittest tests.test_parser; existing cases cover empty input and distinct names."
+      },
+      {
+        "source": "available tools",
+        "content": [
+          "shell",
+          "read_file",
+          "apply_patch",
+          "gh",
+          "send_message"
+        ]
+      },
+      {
+        "source": "gh api user and repository permissions",
+        "content": {
+          "login": "maintainer",
+          "permissions": {
+            "push": true
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "c049",
+    "request": "Continue gh-address-review-comments for example/project PR 42 and finish the resolution report.",
+    "observations": [
+      {
+        "source": "session work record",
+        "content": "Fix commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb was pushed to parser-fix; local parser tests pass. No summary or replies have been posted yet."
+      },
+      {
+        "source": "coordinator assignment to worker ci-observer",
+        "content": "Watch the pull_request test workflow for example/project#42 at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, run 730 attempt 1, and send me its structured status."
+      },
+      {
+        "source": "ci-observer latest message",
+        "content": {
+          "repository": "example/project",
+          "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "event": "pull_request",
+          "run_id": 730,
+          "attempt": 1,
+          "status": "in_progress",
+          "conclusion": null,
+          "elapsed_seconds": 60,
+          "observation_bound_seconds": 300
+        }
+      },
+      {
+        "source": "ci-observer latest gh api response",
+        "content": {
+          "status": 403,
+          "headers": {
+            "retry-after": "45",
+            "x-ratelimit-remaining": "4812"
+          },
+          "body": {
+            "message": "You have exceeded a secondary rate limit. Please wait a few minutes before you try again."
+          }
+        }
+      },
+      {
+        "source": "worker runtime status",
+        "content": "ci-observer remains active; its message channel is available."
+      }
+    ]
+  },
+  {
+    "id": "c050",
+    "request": "Finish the review of example/project PR 42 using gh-review-pr and post it.",
+    "observations": [
+      {
+        "source": "gh pr view 42 --repo example/project --json headRefOid,state,isDraft",
+        "content": {
+          "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "state": "OPEN",
+          "isDraft": false
+        }
+      },
+      {
+        "source": "reviewer-a handoff",
+        "content": {
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "findings": [
+            {
+              "path": "src/rate.py",
+              "line": 2,
+              "severity": "Blocking",
+              "body": "Zero elapsed time reaches division and raises ZeroDivisionError instead of the documented ValueError."
+            }
+          ]
+        }
+      },
+      {
+        "source": "reviewer-b handoff",
+        "content": {
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "findings": [
+            {
+              "path": "src/rate.py",
+              "line": 2,
+              "severity": "Nonblocking",
+              "body": "The new rate function lacks the documented elapsed_seconds <= 0 validation."
+            },
+            {
+              "path": "src/rate.py",
+              "line": 2,
+              "severity": "Blocking",
+              "body": "Rounding drops fractional rates despite the documented return contract."
+            }
+          ]
+        }
+      },
+      {
+        "source": "PR diff for src/rate.py",
+        "content": "+ def rate(amount, elapsed_seconds):\n+     return round(amount / elapsed_seconds)"
+      },
+      {
+        "source": "docs/rate.md at PR head",
+        "content": "Return the unrounded rate, preserving fractional values. Raise ValueError when elapsed_seconds is zero or negative."
+      },
+      {
+        "source": "gh api repos/example/project/pulls/42/reviews",
+        "content": []
+      },
+      {
+        "source": "gh api user",
+        "content": {
+          "login": "maintainer"
+        }
+      }
+    ]
   }
 ]
