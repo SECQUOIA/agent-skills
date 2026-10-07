@@ -13,6 +13,8 @@ Every workflow remains usable by one agent. Delegation is optional: honor a solo
 request, and proceed sequentially when helpers are unavailable or unhelpful, with
 the same scope, checks, and completion criteria. Invoking another skill does not
 require spawning another agent.
+Model, effort, and helper count never replace evidence or permissions. When
+choosing them, read [resource allocation](references/resource-allocation.md).
 
 ## Target and authorization
 

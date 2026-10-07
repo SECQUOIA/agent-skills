@@ -7,6 +7,10 @@ within the user's scope; honor a request to work alone. If helpers are unavailab
 continue sequentially where consistent with the request and disclose any explicitly
 requested delegation that could not be supplied.
 
+For workload-based model/effort choices and a concurrency budget, use
+[resource allocation](resource-allocation.md). Apply its recommendations within
+the ownership and verification contract below; it grants no publication authority.
+
 ## Assign a bounded task
 
 The coordinator is the agent responsible for the user's overall task. It retains

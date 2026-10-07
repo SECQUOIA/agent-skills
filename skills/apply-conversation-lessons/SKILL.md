@@ -35,6 +35,8 @@ change only the smallest appropriate owner.
 
 - Read available skill-creator guidance. Resolve installed symlinks and read each
   file at the path to be edited; use bounded chunks if output truncates.
+- When choosing models, effort, or helpers, use shared
+  [resource allocation](../gh-workflow-conventions/references/resource-allocation.md).
 - Before editing a managed/shared repository, follow
   [managed changes](references/managed-changes.md). Keep user-owned customizations
   out of plugin caches unless the user specifically requested a cache edit.

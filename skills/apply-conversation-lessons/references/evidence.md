@@ -47,3 +47,29 @@ must not disappear inside an average score. Distinguish a decision-only simulati
 from a tool-using workflow evaluation and either from an actual production run.
 The repository's `evals/` tools provide a starting point; they need not be installed
 in every consuming repository.
+
+## Resource allocation comparisons
+
+Compare effort within one fixed model/client and instruction revision first,
+using paired solo tasks with the same tools, permissions, and grading. Test helper
+count and helper model separately afterward; keep the primary setting fixed.
+Use multiple representative task instances, including procedural gates, misleading
+feedback, seeded defects and decoys, scientific evidence, and explicit solo limits.
+Additional effort and agent count are separate hypotheses, not quality guarantees.
+
+Record requested settings and client-reported model/effort with their provenance.
+An omitted flag plus a documented default only supports an inference when the
+relevant configuration/environment is known. Missing fields stay unknown; an
+initialization event may report client state without confirming every API turn.
+Preserve enough sanitized configuration to reproduce precedence without recording
+credentials. Historical plans and hook observations are not controlled effort arms.
+
+Define absolute acceptance criteria before comparing arms. Measure completion,
+defect recall, false findings, gate decisions, unnecessary work/rework, elapsed time,
+and total usage across the primary and helpers. Report critical failures separately
+and variability across trials; majority success must not hide intermittent defects.
+The highest-effort arm can also fail the acceptance criteria. Small pilots screen
+for regressions; zero observed failures does not establish a reliable safety floor.
+Claims of non-inferiority need predefined tolerances and adequate independent cases,
+with held-out validation before broad adoption. Proposing trials does not authorize
+paid batches, external writes, or configuration changes.
