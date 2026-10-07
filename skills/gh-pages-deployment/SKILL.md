@@ -50,6 +50,19 @@ the symptom; do not install a browser for an unrelated deployment check.
 
 ## Make the authorized change
 
+For a rejected branch push (`fetch first` or non-fast-forward), refresh the run
+attempt, PR head, and destination tip. Inspect every writer to that destination:
+preview and main/tag/manual publishers, cleanup/history jobs, and aggregation.
+Compare their active runs and commits with the failed fetch/push window;
+overlapping runs alone do not prove a race. Check competing publishers before
+an authorized bounded rerun.
+
+When concurrency is the cause, serialize writes by destination across workflows
+and refs, retaining publication gates and queued work. A per-PR or per-workflow
+lock does not protect a shared branch. Do not force-push, replace shared history,
+or suppress push failures merely to obtain green CI. Verify the repaired run and
+the served preview or site at its actual hosting route.
+
 For a requested repair, fix the evidenced cause and validate it. Reproduce a
 hosted configuration build from the dependency set being committed, so the test
 represents the host's eventual environment. If only diagnosis was requested,
