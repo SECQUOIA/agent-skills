@@ -26,7 +26,7 @@ ordinary messages suffice, without a required schema or new tracking service:
 | Target and evidence | Verified repository, issue/PR, pinned base/head or source tree, and the concrete question or change |
 | Instructions | Resolved path to the owning `SKILL.md` (or provider resource identifier), available in the worker's environment |
 | Authority | User limits, allowed reads/execution/local edits, permitted paths, and any explicitly authorized external surface |
-| Resources | Absolute working directory, owned branch/ref and artifacts, shared environment/output restrictions, and integration owner |
+| Resources | Absolute working directory, owned branch/ref and artifacts, shared environment/output restrictions, integration owner, and additional-helper allowance (default zero; counts all descendants within the task budget) |
 | Completion | Expected findings or patch, checks/evidence, dependencies, stopping conditions, and remaining relevant workflow budget |
 
 Load the named skill and applicable references in the worker's context; do not
@@ -45,6 +45,15 @@ capability only to its designated owner. Use evaluations of the actual model,
 client, instructions, and permissions to guide delegation; a model name or a small
 passing sample does not establish reliable execution. These limits govern actions,
 not access to the skill's instructions. Keep the same authority boundary across models.
+
+Before allowing nested helpers, the coordinator reserves an explicit allowance
+from the remaining task concurrency budget. Count live helpers plus unused
+reservations when allocating, and do not assign the same capacity twice. A worker
+may divide its allowance among descendants but cannot enlarge it; spawning uses
+reserved capacity rather than creating a second allowance. Report active children
+and release unused reservations before the coordinator reassigns that capacity.
+Without an allowance, work locally or ask the coordinator to repartition; available
+runtime slots alone do not permit nesting. Ordinary assignment messages suffice.
 
 Nested workers inherit the same limits and respect existing resource ownership;
 assign mutable resources before re-delegating. Stay within the assignment and
