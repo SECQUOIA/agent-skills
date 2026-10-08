@@ -24,12 +24,20 @@ release: maintenance or citation edits alone need not create a package version
 unless requested or required by policy. Protect local work and use a clean release
 checkout based on the fresh remote default branch.
 
+For a repository with Zenodo integration or an explicit archive request, read
+[archive verification](references/zenodo.md) during preparation as well as
+post-publication verification.
+
 ## Prepare and merge
 
 - Wait for default-branch CI on a just-merged implementation before branching.
 - Bump necessary version metadata; refresh sibling docs/test/benchmark compat
   pins on this package when the bump makes them stale. An already-correct
   version does not need an empty bump.
+- Before registration or tagging freezes the release, compare license identifiers
+  in release-bound citation files and any prepared archive metadata with the
+  release source's license files. Correct mismatched metadata in preparation;
+  do not infer the source license from citation or inherited archive fields.
 - For tagged URL installs, commit the reproducible
   `Pkg.add(url="REPOSITORY_URL", rev="vX.Y.Z")` example when policy requires it.
   The reviewed PR may reference the future tag created after its merge.
@@ -77,8 +85,7 @@ require the tag's dereferenced SHA (not its tag-object SHA) to equal the verifie
 release commit. A mismatch stops publication completion; apply the same explicit
 authorization boundary before any retargeting.
 A release's branch-valued `targetCommitish` does not override
-the tag's actual target. For a repository with Zenodo integration or an explicit
-archive request, load [archive verification](references/zenodo.md).
+the tag's actual target.
 
 Post downstream updates only when requested and after installation/import succeed.
 Check the target before posting; include the applicable PRs, release and install
