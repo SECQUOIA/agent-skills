@@ -71,3 +71,12 @@ patch equivalence; retain uncertain/unique work. Record exact SHAs in a verified
 recovery bundle, including remote-only candidates, then recheck tips immediately
 before deletion and skip moved refs. Report local deletion, remote deletion, and
 tracking-ref pruning distinctly with the recovery location.
+
+For a requested policy to delete branches after all merged PRs, prefer GitHub's
+native `delete_branch_on_merge` setting to a custom cleanup workflow. It covers
+human and Dependabot PRs; a bot-only request does not authorize enabling it for
+all PRs. Before proposing bot-only automation, inspect whether Dependabot already
+deletes its own merged head refs. Existing branch deletion and a future repository
+policy are separate scopes: neither authorizes the other. Apply an authorized
+setting change with the shared [write/readback rules](github-writes.md), and verify
+the setting and existing protections for every repository in a bulk rollout.

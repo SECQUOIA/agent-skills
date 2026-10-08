@@ -87,7 +87,7 @@ adding helpers or recommending a different model or effort, read
 | Cache, process, kernel, or toolchain failures | [Environment troubleshooting](references/environment-troubleshooting.md) |
 | Scratch execution, worktrees, merge results, concurrent checkout use | [Worktrees and checkouts](references/worktrees-and-checkouts.md) |
 | Selecting or assessing verification | [Test quality](references/test-quality.md) |
-| Editing, staging, pushing, generated files, or cleanup | [Change hygiene](references/change-hygiene.md) |
+| Editing, staging, pushing, generated files, cleanup, or branch-deletion policies | [Change hygiene](references/change-hygiene.md) |
 
 ## Handoff
 
