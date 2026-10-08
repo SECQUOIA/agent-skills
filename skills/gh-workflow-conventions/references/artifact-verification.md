@@ -31,6 +31,19 @@ Choose and report the equality layer:
 Generated artifacts may include deliberate human edits absent from their generator.
 Follow [change hygiene](change-hygiene.md) before rebuilding over them.
 
+## Installable distributions
+
+For release readiness or packaging changes, verify the built distribution rather
+than relying on source tests, an editable install, or a successful build. Check
+that archives contain the library code and required runtime resources; when both
+a source archive and a binary distribution ship, build the latter from the former.
+Install the artifact with its declared dependencies in a clean environment and
+exercise representative imports and resource consumers outside the checkout.
+Exclude checkout paths and editable import hooks, and verify imports resolve to
+the installed artifact. Report the runtimes actually checked and any gaps before
+publishing or claiming release readiness. Prefer a project CI guard for this
+contract when packaging is the defect being fixed.
+
 ## Rendered contracts
 
 For changed visual content, inspect relevant rendered pages/figures; a successful
