@@ -38,6 +38,14 @@ post-publication verification.
   in release-bound citation files and any prepared archive metadata with the
   release source's license files. Correct mismatched metadata in preparation;
   do not infer the source license from citation or inherited archive fields.
+- Check the exact release source's README, notes, installation and versioned
+  manual for absolute preparation claims that become false after publication.
+  Keep future commands conditional on verified availability; put dated mutable
+  status in tracker evidence or explicitly historical context. A later main-only
+  edit cannot repair wording already frozen in the registered tree.
+- When adding or changing registration, TagBot or release-documentation automation,
+  read [publication automation](references/publication-automation.md) before
+  selecting the release commit or introducing credentials/triggers.
 - For tagged URL installs, commit the reproducible
   `Pkg.add(url="REPOSITORY_URL", rev="vX.Y.Z")` example when policy requires it.
   The reviewed PR may reference the future tag created after its merge.
@@ -86,6 +94,10 @@ release commit. A mismatch stops publication completion; apply the same explicit
 authorization boundary before any retargeting.
 A release's branch-valued `targetCommitish` does not override
 the tag's actual target.
+For General, also require the version's registry `git-tree-sha1`, the verified
+release package tree (the package subtree for a monorepo) and the installed
+manifest tree to match. A matching version number alone does not establish that
+users received the verified source.
 
 Post downstream updates only when requested and after installation/import succeed.
 Check the target before posting; include the applicable PRs, release and install
