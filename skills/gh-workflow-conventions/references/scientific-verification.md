@@ -63,6 +63,21 @@ incumbent objective. Match strengthening, domains, budgets, and capable direct
 baselines when evaluating decomposition; distinguish feasible solution quality,
 valid gap progress, formulation gains, and computational advantage.
 
+For exhaustive samplers and enumeration oracles, enforce conservative limits on
+compiled state dimensions, assignments, and memory before unchecked exponentiation,
+state allocation, or solver dispatch. Compilation can add encoded/slack variables;
+source variable counts are insufficient. Reject work outside the validated limits
+and record the refusal; a timeout alone does not prevent memory exhaustion. Apply
+guards to independent references too. Test oversized input and exhausted budgets
+without allocating their state spaces, and prove the child was not invoked.
+
+Compare total work across decomposition calls, not just child-call counts: binary
+enumeration costs `2^n` assignments per child, with evaluation/storage costs that
+can also depend on its model. Reserve work before each call against a shared run
+allowance; report limits, reserved work, actual completed work, and failures. Choose
+caps for the validated implementation and environment rather than generalizing
+one fixture's safe size to other solvers.
+
 ## Requested performance/benchmark evidence
 
 Define a bounded comparison and pin source, versions, resources, threads, settings,
