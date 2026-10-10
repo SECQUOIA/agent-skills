@@ -1,7 +1,27 @@
-# Notebook Outputs and Provenance
+# Notebook Purpose, Outputs, and Provenance
 
-Use when committed notebooks/outputs, execution provenance, or cross-runtime
-notebook parity are part of the deliverable.
+Use when authoring/reviewing notebook content, committed outputs, execution
+provenance, or cross-runtime notebook parity.
+
+## Purpose and explanation
+
+For new or substantially revised examples, check the intended audience and use.
+Application demonstrations need a motivating problem, an explanation of the chosen
+algorithm and why it applies, and definitions of resource limits before use.
+Include exercises/hidden solutions only when the requested format calls for them;
+do not infer classroom use from the notebook format. Cite the algorithm's primary
+references where its method and guarantees are explained, alongside implementation
+links. Use [scientific verification](scientific-verification.md) for optimization
+problem statements, solver statuses, and reformulation claims.
+
+Small exhaustive fixtures establish correctness and explain mechanics. Claims of
+practical utility or scale need representative bounded examples and relevant
+comparisons; defer unsupported claims if that development/evidence is pending.
+Passing execution and output checks alone does not establish that the notebook
+demonstrates its stated purpose. An output-only refresh need not redesign existing
+content outside the requested scope.
+
+## Execution and published outputs
 
 Identify the published artifact first. A tracked source notebook may carry the
 visible outputs while CI executes into an ignored `_output.ipynb`; green execution

@@ -49,12 +49,30 @@ author names and parser/style behavior for compound family names.
 
 ## Optimization claims
 
+State objective sense, constraints, and decision-variable domains in optimization
+problem statements, including binary versus spin conventions. Distinguish the
+source problem from its encoded or penalized target before discussing guarantees.
+
 Verify model class and algorithm guarantees. An `optimal` status, zero displayed
 gap, or global MIP subsolver does not certify a nonconvex outer algorithm. Audit the
 returned point against original equations, bounds, integrality, selection rules,
 and selected disjuncts. Inventory required variables: restore recorded fixed choices,
 but never invent missing free states from initial guesses or reference optima.
 Call incomplete audits incomplete.
+
+Completed exhaustive search establishes a global optimum over the enumerated
+feasible domain. If a public status contradicts that guarantee or result metadata,
+trace the getter and reproduce the discrepancy in the owning package. Treat a
+confirmed status-reporting defect as upstream work within the authorized scope,
+rather than rationalizing it as an intended algorithm limitation or preserving it
+as the desired regression contract. Keep observed outputs truthful; a downstream
+status override is not a substitute for repairing and testing the public contract.
+
+Before attributing an invalid reformulated solution to automatic compiler behavior,
+inspect explicit penalty/encoding overrides and check the supported default path.
+A deliberately insufficient override establishes a configuration failure, not a
+default-selection bug. Use valid formulations in normal-use demonstrations; reserve
+deliberately broken settings for examples whose stated purpose is failure diagnosis.
 
 Separate raw reported bounds from certified bounds. Local solver failure does not
 prove global infeasibility or justify globally valid cuts. For an early-stopped
