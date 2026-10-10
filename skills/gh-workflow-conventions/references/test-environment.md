@@ -16,6 +16,17 @@ covers source contamination. Preserve the same environment when a command needs
 additional permissions. Scope any install/cache writes and avoid installer changes
 to shell profiles; inspect and undo only side effects created by the task.
 
+Bound local work that can exhaust a shared machine — proof checkers and builds,
+dense simulations, solvers, enumerations — with an operating-system limit, not
+only a timeout. Prefer a resident-memory limit with swap disabled (for example a
+`systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0` scope) over a
+virtual-address limit, which some toolchains exceed at startup; choose caps for
+the machine and keep concurrent capped jobs within its memory. Apply the limit to
+every invocation of such a tool, including quick probes and auxiliary binaries.
+An unfamiliar flag such as `--help` may start real work, and an uncapped process
+can outlive a killed session; read the tool's documentation or source instead of
+running it to learn its interface.
+
 A local result supports CI parity only when relevant runtime/tool versions,
 dependencies, and invocation flags match. For floating CI versions, resolve what
 that run installed before rewriting files with a local formatter. Do not change

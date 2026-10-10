@@ -26,7 +26,7 @@ ordinary messages suffice, without a required schema or new tracking service:
 | Target and evidence | Verified repository, issue/PR, pinned base/head or source tree, and the concrete question or change |
 | Instructions | Resolved path to the owning `SKILL.md` (or provider resource identifier), available in the worker's environment |
 | Authority | User limits, allowed reads/execution/local edits, permitted paths, and any explicitly authorized external surface |
-| Resources | Absolute working directory, owned branch/ref and artifacts, shared environment/output restrictions, integration owner, and additional-helper allowance (default zero; counts all descendants within the task budget) |
+| Resources | Absolute working directory, owned branch/ref and artifacts, shared environment/output restrictions, machine-resource limits that apply to every heavy command (see [test environment](test-environment.md)), integration owner, and additional-helper allowance (default zero; counts all descendants within the task budget) |
 | Completion | Expected findings or patch, checks/evidence, dependencies, stopping conditions, and remaining relevant workflow budget |
 
 Load the named skill and applicable references in the worker's context; do not

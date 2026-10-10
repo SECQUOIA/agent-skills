@@ -83,7 +83,7 @@ adding helpers or recommending a different model or effort, read
 | Creating or changing GitHub state | [GitHub writes](references/github-writes.md) |
 | CLI/API, auth, transport, or client errors | [GitHub troubleshooting](references/github-troubleshooting.md) |
 | Judging CI, required gates, reruns, workflow changes | [CI and checks](references/ci-and-checks.md) |
-| Choosing an execution environment | [Test environment](references/test-environment.md) |
+| Choosing an execution environment or running memory-intensive local work | [Test environment](references/test-environment.md) |
 | Cache, process, kernel, or toolchain failures | [Environment troubleshooting](references/environment-troubleshooting.md) |
 | Scratch execution, worktrees, merge results, concurrent checkout use | [Worktrees and checkouts](references/worktrees-and-checkouts.md) |
 | Selecting or assessing verification | [Test quality](references/test-quality.md) |
