@@ -85,6 +85,11 @@ and raw artifacts. Warm JIT paths symmetrically; distinguish setup from solve ti
 Pair median/selected duration with metadata from that repetition or state each
 aggregation. Report confounders and mixed gains.
 
+Compute each paired difference before aggregating across repetitions;
+subtracting per-mode medians yields a different statistic. Retain aggregation/audit
+code with reproducible benchmark evidence and check published tables, including
+units, against the raw attempts.
+
 Attribute costs to the operations actually inside the timing boundary. A broad
 setup phase may include construction, conversion, copying and checks; isolate
 the suspected operation before naming it a bottleneck. Keep ordinary, instrumented
