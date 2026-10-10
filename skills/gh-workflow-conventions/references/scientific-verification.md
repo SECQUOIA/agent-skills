@@ -85,6 +85,15 @@ and raw artifacts. Warm JIT paths symmetrically; distinguish setup from solve ti
 Pair median/selected duration with metadata from that repetition or state each
 aggregation. Report confounders and mixed gains.
 
+Attribute costs to the operations actually inside the timing boundary. A broad
+setup phase may include construction, conversion, copying and checks; isolate
+the suspected operation before naming it a bottleneck. Keep ordinary, instrumented
+and profiled runs distinct in job identity, exports and reports; verify the
+exported groups rather than relying on richer raw metadata. Compare instrumentation
+against ordinary controls and report its overhead. When profiling materially
+perturbs runtime, use stacks for qualitative investigation, not ordinary-time
+shares. Inclusive stack counts overlap and cannot be added as phase durations.
+
 For attribution to one setting, compare solver-facing equations, bounds, ordering,
 and initialized values, not just parameter names or dimensions. Separate explicit
 model scaling from automatic solver scaling and retain matched default controls
