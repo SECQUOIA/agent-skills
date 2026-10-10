@@ -12,4 +12,6 @@ Use APPROVE only when every inventoried item is Addressed at the unchanged head,
 
 Resolve only verified Addressed threads without newer disagreement, never Partially addressed, Not addressed, or declined Blocking items. Use the shared bulk-thread procedure and verify every target. Report any remaining body findings separately even when there are no unresolved threads. After marking ready, inspect fresh workflows triggered by readiness and report their actual state.
 
+For author-scoped requests such as “resolve my comments,” bind the named person to a confirmed GitHub account and select by each thread's opening-comment author. A reply by that account in someone else's thread does not make the thread eligible. Compare intended and changed thread ID sets; leave other authors' threads untouched unless separately authorized.
+
 If all content is addressed but CHANGES_REQUESTED remains, identify the reviewer whose decision remains and the re-review/dismissal needed. An eligible outcome review from that same account may update its verdict; another account's approval does not erase it. For the author account, a requested affirming comment can record evidence, but cannot serve as formal approval.
