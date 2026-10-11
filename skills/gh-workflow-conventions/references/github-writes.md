@@ -68,6 +68,11 @@ proven-unapplied targets, in smaller batches if needed.
   closure matters, inspect messages and `closingIssuesReferences`; a correcting
   comment does not clear a body/commit closing reference. A body change requires
   its own authorization; do not rewrite pushed commits to remove a keyword.
+- Match an issue's closure reason to the authorized disposition. Bounded
+  non-reproduction alone neither proves a fix nor authorizes closure. If the user
+  elects to close as not currently actionable, use `not_planned`, record the tested
+  bounds, remaining uncertainty, and a concrete reopening trigger, and verify both
+  `state` and `state_reason` on readback.
 - Use URLs returned by tools or verify the exact constructed URL. Expand short
   SHAs through Git/API, never guess them. Read numeric values in the stated source
   artifact at the stated ref; do not reconstruct a “source” value from rounded
