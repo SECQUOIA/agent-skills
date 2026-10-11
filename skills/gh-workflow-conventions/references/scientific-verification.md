@@ -103,6 +103,12 @@ and raw artifacts. Warm JIT paths symmetrically; distinguish setup from solve ti
 Pair median/selected duration with metadata from that repetition or state each
 aggregation. Report confounders and mixed gains.
 
+Scope attempt counters and failure records to the producing run or campaign.
+Carry earlier failed attempts into a continuing campaign's budget with explicit
+provenance; a fresh reproduction records its own attempts instead of injecting
+historical failures as new observations. Preserve the original campaign ledger
+with its retained evidence, separately from new-run output.
+
 Compute each paired difference before aggregating across repetitions;
 subtracting per-mode medians yields a different statistic. Retain aggregation/audit
 code with reproducible benchmark evidence and check published tables, including
