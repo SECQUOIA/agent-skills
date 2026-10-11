@@ -103,6 +103,23 @@ and raw artifacts. Warm JIT paths symmetrically; distinguish setup from solve ti
 Pair median/selected duration with metadata from that repetition or state each
 aggregation. Report confounders and mixed gains.
 
+For seeded stochastic benchmarks, confirm the effective seed at backend dispatch,
+including the compiled boundary when native forwarding is claimed, and reconcile
+it with public metadata. A stored attribute, parent label, or zero-call control
+does not prove forwarding. Exact repeatability controls must match solver-facing
+inputs, initialization, schedules and completed work; use symmetric warmups and
+nonbinding algorithm deadlines under a separate safety bound. Preserve sample
+multiplicities when ignoring harmless row ordering. Equal seeds with unequal work
+do not establish or refute exact repeatability. Later seeded controls do not
+retroactively relabel earlier unseeded measurements.
+
+A reusable benchmark validation gate must bind executable dependencies, including
+shared scoring/conversion code, runtime/backend identity and retained evidence,
+rather than only modified adapter files. Exercise the actual parsed gate and
+artifact hashes, rejecting missing or stale prerequisites before optimization.
+Reuse measured evidence only when those bound inputs remain unchanged; gate
+plumbing, documentation and derived audits can be checked without another solve.
+
 Scope attempt counters and failure records to the producing run or campaign.
 Carry earlier failed attempts into a continuing campaign's budget with explicit
 provenance; a fresh reproduction records its own attempts instead of injecting
