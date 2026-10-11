@@ -16,6 +16,12 @@ covers source contamination. Preserve the same environment when a command needs
 additional permissions. Scope any install/cache writes and avoid installer changes
 to shell profiles; inspect and undo only side effects created by the task.
 
+Keep validation inputs stable for the duration of each check. Finish source edits
+and formatter rewrites before running tests, docs, or benchmarks in that checkout,
+or run them against separate pinned snapshots. Independent checks may run in
+parallel against stable inputs. If edits overlap a check, rerun affected checks on
+the intended stable tree before attributing their results to a published head.
+
 Bound local work that can exhaust a shared machine — proof checkers and builds,
 dense simulations, solvers, enumerations — with an operating-system limit, not
 only a timeout. Prefer a resident-memory limit with swap disabled (for example a
