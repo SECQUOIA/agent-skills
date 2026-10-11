@@ -125,6 +125,9 @@ Carry earlier failed attempts into a continuing campaign's budget with explicit
 provenance; a fresh reproduction records its own attempts instead of injecting
 historical failures as new observations. Preserve the original campaign ledger
 with its retained evidence, separately from new-run output.
+Within a continuing campaign, retain each attempt's raw outputs before a retry
+can overwrite them. Audit successful-attempt result rows separately from
+cumulative reserved or consumed work, including failed attempts.
 
 Compute each paired difference before aggregating across repetitions;
 subtracting per-mode medians yields a different statistic. Retain aggregation/audit
