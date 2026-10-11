@@ -58,6 +58,11 @@ do not multiply retries across workers.
   push workflows. Verify the authorized deployment path on the actual merge SHA.
   Keep privileged `pull_request_target` listeners on trusted metadata/base code;
   do not execute contributor code with privileged credentials.
+- Job permissions apply to every step and matrix entry. When only an upload needs
+  extra credentials or `id-token: write`, prefer a small job that consumes the
+  verified report artifact without running contributor scripts. Repository read
+  access does not prevent an identity token from authorizing external writes;
+  assess that service's trust conditions and fork/Dependabot behavior separately.
 
 ## Failure attribution
 
@@ -85,6 +90,13 @@ branch object, detailed protection when accessible, and applicable branch rules:
 - `branches/<base>` exposes `protected` and summary protection.
 - `branches/<base>/protection` may require Administration read access.
 - `rules/branches/<base>` exposes applicable rules.
+
+Moving a step out of a required lane can remove its enforced merge gate even if
+the new job still fails strictly. Compare the old/new check graph with native
+required contexts and custom merge automation. An automation rule requiring all
+reported checks does not make a new context required for human merges. Preserve
+the gate through settings changes only when authorized; otherwise prepare the
+exact required-check change and report that remaining action.
 
 A detailed endpoint's 404 does not override `protected: true`. Report an exact
 approval count/context only from a successful settings/rules response. A specific
