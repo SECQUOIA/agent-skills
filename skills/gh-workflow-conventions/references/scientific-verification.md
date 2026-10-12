@@ -68,6 +68,13 @@ rather than rationalizing it as an intended algorithm limitation or preserving i
 as the desired regression contract. Keep observed outputs truthful; a downstream
 status override is not a substitute for repairing and testing the public contract.
 
+For early-stopped child solvers, assess termination cause separately from returned
+result validity. To verify that a parent integrates valid interrupted results, use
+an independently checked child solution that improves its prior incumbent and
+assert reconstruction and incorporation. Retaining the parent's old valid solution
+does not prove integration. Inspect status filtering and result-scan ordering in
+the exact dependency revision before assigning an adapter or upstream defect.
+
 Before attributing an invalid reformulated solution to automatic compiler behavior,
 inspect explicit penalty/encoding overrides and check the supported default path.
 A deliberately insufficient override establishes a configuration failure, not a
