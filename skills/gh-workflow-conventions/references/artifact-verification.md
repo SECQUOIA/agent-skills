@@ -60,6 +60,24 @@ and actual badge text. HTTP 200 is not proof of the intended label. If GitHub's
 image proxy disagrees with the canonical image, check both before editing source;
 a transient cache response is not a repository defect.
 
+For documentation navigation, compare rendered internal URL fragments with the
+target HTML's actual IDs or named anchors, preserving case and decoding URL escapes.
+Markdown file-existence checks, successful builds and matching served bytes can
+all pass while a section link is broken. Check release-bound manuals before their
+source is frozen; check the deployed artifact again when claiming hosted navigation.
+The read-only [HTML fragment checker](../scripts/check_html_fragments.py) checks
+owned static HTML without fetching external sites:
+
+```sh
+python -B /absolute/skill/path/scripts/check_html_fragments.py /rendered/html \
+  --base-url https://example.org/manual/
+```
+
+Use the directory URL corresponding to the rendered root. External targets,
+non-HTML fragments and native text-only fragments are outside this check; dynamic
+anchors and interactive navigation still need browser evidence. Report discovered
+defects separately from successful deployment or byte comparisons.
+
 Scientific values and comparisons use [scientific verification](scientific-verification.md).
 Notebook output/provenance uses [notebook artifacts](notebook-artifacts.md). Build
 package/font gaps use [environment troubleshooting](environment-troubleshooting.md).

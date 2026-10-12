@@ -50,7 +50,9 @@ post-publication verification.
   `Pkg.add(url="REPOSITORY_URL", rev="vX.Y.Z")` example when policy requires it.
   The reviewed PR may reference the future tag created after its merge.
 - Run proportionate package checks, including `Pkg.test()` when feasible and the
-  local docs build when the release checklist requires it. Record limitations.
+  local docs build when the release checklist requires it. Before freezing a
+  release-bound manual, verify its [rendered section links](../gh-workflow-conventions/references/artifact-verification.md#rendered-contracts).
+  Record limitations.
 - Push and open the release PR when changes are needed. Verify current-head
   required checks and mergeability before merging; do not bypass CI.
 - Before publishing, verify the exact release commit and its default-branch

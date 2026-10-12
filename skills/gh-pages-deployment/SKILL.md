@@ -42,6 +42,10 @@ timestamps, or relevant visible content with the intended release/merge. A
 cache-busted metadata endpoint is useful when the site exposes one; otherwise
 state the weaker evidence from HTML and headers.
 
+For manual navigation checks, use [rendered artifact verification](../gh-workflow-conventions/references/artifact-verification.md#rendered-contracts)
+to check internal section links against generated HTML, separately from deployment
+success and served-byte equality.
+
 An asset's HTTP 200 proves that URL is served, not that the page renders it.
 For a rendering complaint, inspect the browser's actual requests or built
 HTML/JS/CSP: picture/WebP substitution, lazy loading, and policy restrictions can
