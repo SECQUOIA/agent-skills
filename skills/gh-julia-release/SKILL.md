@@ -34,6 +34,13 @@ post-publication verification.
 - Bump necessary version metadata; refresh sibling docs/test/benchmark compat
   pins on this package when the bump makes them stale. An already-correct
   version does not need an empty bump.
+- During a version bump, compare `pkgversion` with solver/backend version metadata
+  where exposed. For versions captured during precompilation, verify that
+  `Project.toml` changes invalidate the cache (for example, through
+  `Base.include_dependency`). If uncertain, exercise a version-only change with
+  a reused cache in a disposable checkout; a fresh-depot import alone does not
+  test invalidation. Repair dependency tracking rather than masking a reproducible
+  mismatch with cache deletion or a hardcoded release version.
 - Before registration or tagging freezes the release, compare license identifiers
   in release-bound citation files and any prepared archive metadata with the
   release source's license files. Correct mismatched metadata in preparation;
