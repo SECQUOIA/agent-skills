@@ -30,11 +30,14 @@ just the one with the expected depth.
 
 ## Optional dependencies
 
-Distinguish minimal-install importability from backend execution. Place optional
-imports behind the established skip mechanism when module import genuinely requires
-them; keep production imports unconditional when collection itself is meant to
-verify backend-free importability. Run the relevant minimal profile and identify
-the backend-enabled lane rather than generalizing from a rich local environment.
+Distinguish package optionality from test-lane requirements. In a minimal profile
+that intentionally omits a backend, use established absence-based skips for
+backend-dependent tests; keep production imports unconditional when collection
+verifies backend-free importability. In a lane that declares the backend packages
+as dependencies, import or initialization failures must fail the lane, not skip its
+integration suite. Do not catch arbitrary import errors as evidence of absence.
+Run the relevant minimal profile and real backend-enabled lane; verify backend
+tests executed before claiming integration coverage.
 
 For fallback changes, execute the missing-dependency path. An isolated environment
 without the package is preferable when readily available; a targeted import blocker
