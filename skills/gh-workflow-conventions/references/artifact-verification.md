@@ -55,6 +55,13 @@ page/margins, with visual inspection of borderline pages. OOXML edits require
 package relationships/styles/sections as well as visible text; inherited cover
 headers can affect body pages even when old members remain unchanged.
 
+Publication copies that intentionally omit material, such as blank student
+notes, need a content-leak check beyond visible ink. Inspect extracted text,
+accessibility descriptions/ActualText, and embedded or associated data such as
+equation MathML. White or hidden source runs can still reveal answers. Preserve
+the intended editable-master convention; sanitize only the authorized publication
+artifact and verify that its visible layout remains intact.
+
 For README badge/link rendering defects, inspect GitHub's rendered anchors/images
 and actual badge text. HTTP 200 is not proof of the intended label. If GitHub's
 image proxy disagrees with the canonical image, check both before editing source;
