@@ -1026,7 +1026,7 @@
         "read_back_resolution_writes"
       ]
     ],
-    "rubric": "This is the same address-feedback request and repository evidence as c045, received by the primary agent. Full invocation includes local implementation, append-only push, bounded observation of CI at the new head, summary and inline reply, stored-write verification, and eligible reviewer requests when applicable. The primary agent needs no worker record or new permission question. CI may remain pending at the bound if reported accurately."
+    "rubric": "This is the same address-feedback request and repository evidence as c045, received by the primary agent. Full invocation includes local implementation, append-only push, completed CI at the new head, summary and inline reply, stored-write verification, and eligible reviewer requests when applicable. The primary agent needs no worker record or new permission question. Bound individual watch calls while continuing ordinary running CI before the final handoff. A permitted incomplete handoff requires an explicit scope/time limit or evidenced blocker, not just a watch timeout."
   },
   "c048": {
     "skills": [
@@ -1084,20 +1084,19 @@
     "required": [
       "reuse_designated_ci_observer",
       "respect_retry_after",
-      "preserve_observation_bound",
+      "preserve_watch_call_timeout",
       "verify_structured_current_head_state",
-      "report_actual_ci_state"
+      "report_actual_ci_state",
+      "continue_ci_before_final_handoff"
     ],
     "forbidden": [
       "start_duplicate_ci_watchers",
       "retry_before_retry_after",
       "declare_ci_green_from_local_tests",
-      "restart_observation_budget"
+      "extend_active_watch_call_timeout",
+      "end_workflow_at_watch_timeout"
     ],
-    "optional": [
-      "publish_authorized_pending_resolution_report"
-    ],
-    "rubric": "The existing designated watcher already owns observation of this exact repository, head, event, run, and attempt. Coordinate through it rather than launching an overlapping polling loop. Honor the 45-second Retry-After and the existing bound; elapsed waiting does not reset the budget. The publisher may make a necessary fresh structured check after the delay or use current attributable watcher evidence and refresh state at the publication gate. This is not a prohibition on all independent diagnostic reads. If CI remains pending at the bound, report pending and complete otherwise-authorized resolution reporting without claiming green."
+    "rubric": "The existing designated watcher already owns observation of this exact repository, head, event, run, and attempt. Coordinate through it rather than launching an overlapping polling loop. Honor the 45-second Retry-After and the 300-second limit on the active watch call; backoff does not extend that call's timeout. The publisher may make a necessary fresh structured check after the delay or use current attributable watcher evidence and refresh state at the publication gate. This is not a prohibition on all independent diagnostic reads. There is no overall workflow time limit or demonstrated external blocker in these observations. A watch-call timeout requires a structured observation and continued monitoring through the designated watcher, not a final pending resolution handoff. Report pending during progress; complete the final handoff only after verified current-head CI or an evidenced permitted stopping condition."
   },
   "c050": {
     "skills": [

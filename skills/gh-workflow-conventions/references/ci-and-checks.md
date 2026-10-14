@@ -3,13 +3,30 @@
 Use when judging checks, reruns, required gates, or workflow changes. CI evidence
 belongs to a repository, exact head SHA, event, run, and attempt.
 
+## Complete a published PR
+
+For implementation, review-fix, and skills-submission workflows, verified
+current-head CI is part of delivery when CI is configured. Keep observing ordinary
+queued/running checks with progress updates. Bounds on individual watch calls do
+not end this work; a draft PR or passing local tests does not remove the CI gate.
+Diagnose failures and complete authorized fixes within the owning workflow's
+cumulative attempt limit. Keep draft, review, and merge decisions within their
+existing authorization and policy.
+
+Honor explicitly limited local-only, publish-only, or status-only requests. A user
+stop, an explicit overall time/resource limit, a demonstrated external blocker,
+or an exhausted fix budget can require an incomplete handoff: report the exact
+head, unfinished checks, evidence for the stopping reason, and remaining action.
+Ordinary CI runtime or one watch timeout is not such a blocker. Read-only CI
+status requests may report the current state without waiting for completion.
+
 ## Observe the actual head
 
 1. Resolve current `headRefOid`. After a push, if the rich PR view still shows the
    old head, check the remote branch ref and narrow REST PR head before watching.
 2. Read current-head checks and applicable workflow triggers. Empty checks just
-   after a push can mean they have not registered; poll within the workflow's
-   bounded window. A watch exit code is never the verdict.
+   after a push can mean they have not registered; continue polling under the
+   completion gate above. A watch exit code is never the verdict.
 3. After every watch, separately read structured state and conclusion for the
    verified head. Distinguish passed, failed, pending, skipped, gated, and not
    triggered. Do not substitute local tests or a manual dispatch for an absent

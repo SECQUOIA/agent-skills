@@ -35,7 +35,7 @@ Open a draft PR from the repository template, keeping mandatory disclosure/legal
 
 ## CI and completion
 
-Follow [CI observation](../gh-workflow-conventions/references/ci-and-checks.md). A watch exit of zero, no checks yet, or checks on an older SHA are not proof of green CI. After each observation, re-read the PR head and structured final state for that exact SHA; if the head moved, assess the new head before calling it ready. Report queued/running checks as pending at the observation bound, not failed or green.
+Follow [CI completion and observation](../gh-workflow-conventions/references/ci-and-checks.md) before the final PR handoff. A watch exit of zero, no checks yet, or checks on an older SHA are not proof of green CI. After each observation, re-read the PR head and structured final state for that exact SHA; if the head moved, assess the new head before calling it ready. Queued/running checks remain ongoing work under the shared completion gate, including for draft PRs.
 
 Fix attributable CI failures within scope with at most three automated fix/commit/push attempts cumulatively over the PR's life. Mark each such commit `Automation-Attempt: gh-issue-to-pr` and subtract existing trailer-bearing commits from the budget. External failures or an exhausted budget require a concrete handoff, not repeated retries. Do not start a fix loop merely because a watch timed out.
 

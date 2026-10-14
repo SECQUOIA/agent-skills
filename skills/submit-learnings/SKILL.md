@@ -32,9 +32,10 @@ instructions and repository policy.
    requested that edit. Post one new current-state comment with
    `<!-- submit-learnings:head=<HEAD_SHA> -->`; skip an exact marker match. Use a
    body file, live preflight, and exact readback. Do not create a duplicate PR.
-5. Observe current-head checks with the shared bounded CI procedure when CI is
-   configured. Report pending/absent/failing checks explicitly; do not infer green
-   from a watch exit code. Submission does not authorize review or merge.
+5. Follow [CI completion and observation](../gh-workflow-conventions/references/ci-and-checks.md)
+   for current-head checks when CI is configured. Report the verified outcome or
+   a permitted incomplete handoff; do not infer green from a watch exit code.
+   Submission does not authorize review or merge.
 
 Report PR URL, branch/commits, skills changed, backup/replay result, publication
 action, and CI or other remaining gates. The designated reviewer reviews and

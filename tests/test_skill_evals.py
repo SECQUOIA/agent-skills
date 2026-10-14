@@ -126,6 +126,24 @@ class DecisionScoringTests(unittest.TestCase):
                                       assessment(response, complete +
                                                  ["ask_redundant_publication_permission"]))["pass"])
 
+    def test_ci_report_cannot_end_at_watch_timeout(self):
+        case = ev.read_json(ROOT / "evals/expectations.json")["c049"]
+        observed = ["reuse_designated_ci_observer", "respect_retry_after",
+                    "preserve_watch_call_timeout", "verify_structured_current_head_state",
+                    "report_actual_ci_state"]
+        response = {"selected_skill": "gh-address-review-comments", "actions": [
+            "Use the existing watcher after Retry-After, respect its call timeout, "
+            "and report the exact pending head as the final handoff."],
+            "rationale": "The watch call has ended while CI is still running."}
+        self.assertFalse(ev.score(case, response, assessment(response, observed))["pass"])
+        self.assertFalse(ev.score(case, response, assessment(
+            response, observed + ["end_workflow_at_watch_timeout"]))["pass"])
+        response["actions"] = [
+            "Use the existing watcher after Retry-After, respect its call timeout, "
+            "and keep monitoring current-head CI before the final handoff."]
+        self.assertTrue(ev.score(case, response, assessment(
+            response, observed + ["continue_ci_before_final_handoff"]))["pass"])
+
     def test_review_synthesis_requires_both_deduplication_and_distinct_findings(self):
         case = ev.read_json(ROOT / "evals/expectations.json")["c050"]
         response = {"selected_skill": "gh-review-pr",

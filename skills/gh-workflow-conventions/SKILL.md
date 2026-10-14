@@ -95,6 +95,7 @@ adding helpers or recommending a different model or effort, read
 Report the result, material evidence, and remaining gates concisely. Published
 GitHub text should explain the change or finding in the maintainer's voice; keep
 agent mechanics out unless they affect reproducibility. Do not claim completion
-while required current-head checks remain unverified. After a bounded CI wait,
-state the unfinished gate and exact pending checks; a watch intention is not a
-result. Report each target independently when a request names several objects.
+while required current-head checks remain unverified. Apply the
+[published-PR completion gate](references/ci-and-checks.md) before delivering code
+changes; an individual watch timeout does not complete the workflow. Report each
+target independently when a request names several objects.

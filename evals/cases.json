@@ -1417,7 +1417,7 @@
           "status": "in_progress",
           "conclusion": null,
           "elapsed_seconds": 60,
-          "observation_bound_seconds": 300
+          "watch_call_timeout_seconds": 300
         }
       },
       {

@@ -14,7 +14,11 @@ one atomic review tied to its reviewed head. Never delete another session's draf
 Verify claims against current code. Keep tests proportionate to the changed
 behavior and use independent expected values for scientific correctness. Match
 test provenance and CI to the actual PR head. Green or an exit code from an older
-head is not current success. Preserve formal review gates and cap repeated loops.
+head is not current success. Published implementation, review-fix, and skills
+submission include completed current-head CI: continue ordinary queued/running checks
+unless the user limits the task or an evidenced blocker requires an incomplete
+handoff. Watch-call limits do not complete the workflow. Preserve formal review
+gates and cap repeated fix attempts.
 
 Protect unique commits with a verified backup before an authorized rebase and
 account for each patch afterward. A branch backup does not protect dirty files.
