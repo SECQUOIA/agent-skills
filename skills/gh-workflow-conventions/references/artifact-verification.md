@@ -44,6 +44,22 @@ the installed artifact. Report the runtimes actually checked and any gaps before
 publishing or claiming release readiness. Prefer a project CI guard for this
 contract when packaging is the defect being fixed.
 
+## Frozen research snapshots
+
+Resolve whether a requested paper freeze means protecting a source/data snapshot
+or archiving the repository; preserving a snapshot does not authorize stopping
+ongoing maintenance. Pin historical and maintained revisions separately when both
+are supplied. If the exact paper-producing revision or environment is unrecorded,
+disclose that gap rather than labeling a plausible historical checkout as the
+verified producing revision.
+
+Before publishing an immutable release, prepare all intended assets in a draft
+and verify its target commit and uploaded asset digests against the validated
+artifacts. Publish within the authorized scope, then read back server-side
+immutability and intended tag protections before claiming a protected snapshot;
+a tag or "frozen" label alone establishes neither. Correct immutable artifacts
+through a new version rather than silently relabeling their provenance.
+
 ## Rendered contracts
 
 For changed visual content, inspect relevant rendered pages/figures; a successful
