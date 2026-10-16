@@ -38,6 +38,15 @@ finished; do not treat a context's null `status` as pending forever. The legacy
 combined `/commits/<sha>/status` endpoint omits Actions CheckRuns. Use rollup or
 `/commits/<sha>/check-runs`; run IDs in check URLs can help when run-list data lags.
 
+For cross-repository PRs, inspect source-fork runs for the exact PR head before
+declaring hosted CI absent or proposing workflow-policy changes. An empty upstream
+rollup does not establish absence. Apply the event, attempt, log, and actual-test
+execution checks below to qualifying source-fork runs, including push runs. Report
+that evidence separately from checks attached to the upstream PR, and assess it
+against live merge requirements: it cannot replace an enforced upstream context
+or required PR event. Discovering usable CI evidence does not authorize settings
+changes.
+
 Use bounded watches/polls within the client's per-command duration. Inspect
 current state after a harness timeout; it does not prove the run is stuck. Switch
 from noisy watch output to compact run/job polling when useful. Keep queued jobs
