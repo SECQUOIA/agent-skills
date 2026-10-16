@@ -16,6 +16,14 @@ covers source contamination. Preserve the same environment when a command needs
 additional permissions. Scope any install/cache writes and avoid installer changes
 to shell profiles; inspect and undo only side effects created by the task.
 
+Before Julia package setup that includes IJulia, set `IJULIA_NODEFAULTKERNEL=1`
+and task-owned Jupyter data/config/runtime directories, inherited by subprocesses.
+An isolated Julia project/depot does not isolate IJulia's build hook: it can
+remove and recreate a default user kernelspec during instantiation. Keep `HOME`
+unchanged; use an explicit owned kernelspec for execution. If a user entry was
+touched without a prior snapshot, preserve the observed state and report the
+uncertainty; a new directory timestamp does not prove it was absent before.
+
 Keep validation inputs stable for the duration of each check. Finish source edits
 and formatter rewrites before running tests, docs, or benchmarks in that checkout,
 or run them against separate pinned snapshots. Independent checks may run in
