@@ -46,10 +46,13 @@ post-publication verification.
   release source's license files. Correct mismatched metadata in preparation;
   do not infer the source license from citation or inherited archive fields.
 - Check the exact release source's README, notes, installation and versioned
-  manual for absolute preparation claims that become false after publication.
-  Keep future commands conditional on verified availability; put dated mutable
-  status in tracker evidence or explicitly historical context. A later main-only
-  edit cannot repair wording already frozen in the registered tree.
+  manual for preparation claims that become false after publication. Write user
+  entry pages around the released installation and usage path; keep candidate
+  source-install audits, registration status, release authority and acceptance
+  evidence in contributor/release records, even when phrased conditionally.
+  Record pending availability there without claiming publication has occurred.
+  Inspect the repository description too: Registrator copies it into its PR.
+  A later main-only edit cannot repair wording frozen in the registered tree.
 - When adding or changing registration, TagBot or release-documentation automation,
   read [publication automation](references/publication-automation.md) before
   selecting the release commit or introducing credentials/triggers.
