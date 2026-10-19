@@ -1,6 +1,6 @@
 # Dependency and adapter review
 
-Read for dependency/lockfile changes, solver or SDK adapters, vendored implementations, or advertised install paths. Use shared [dependency contracts](../../gh-workflow-conventions/references/dependency-contracts.md) for runtime test mechanics.
+Read for dependency/lockfile changes, dependency security mitigations, solver or SDK adapters, vendored implementations, or advertised install paths. Use shared [dependency contracts](../../gh-workflow-conventions/references/dependency-contracts.md) for runtime tests and persistent-store security checks.
 
 Check actual resolved versions and changed compatibility bounds against fresh base. Run a locked install or equivalent when lock/manifest agreement matters. Inspect mixed-ecosystem locks for duplicated packages in one prefix; successful import alone does not prove that competing artifacts are sound. Re-solve only when a suspicious resolution or outdated mapping needs evidence, not for every unrelated lock change.
 
