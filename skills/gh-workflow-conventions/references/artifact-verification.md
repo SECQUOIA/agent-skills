@@ -71,6 +71,13 @@ page/margins, with visual inspection of borderline pages. OOXML edits require
 package relationships/styles/sections as well as visible text; inherited cover
 headers can affect body pages even when old members remain unchanged.
 
+When concatenating or reordering PDFs for delivery, validate the final file's
+internal link annotations, named destinations, and relevant bookmarks against
+their intended output pages. Assembly can drop destinations or make duplicate
+names resolve into another component. Check destination preservation and page
+offsets; matching extracted text, page counts, or visible layout does not establish
+working navigation. Scope this check to changed assembly or navigation.
+
 Publication copies that intentionally omit material, such as blank student
 notes, need a content-leak check beyond visible ink. Inspect extracted text,
 accessibility descriptions/ActualText, and embedded or associated data such as
