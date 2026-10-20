@@ -1,6 +1,6 @@
 # SECQUOIA Agent Skills
 
-Shared workflow skills for Codex and Claude Code. Each folder in [`skills/`](skills/)
+Shared workflow skills for Codex, Claude Code, and Antigravity. Each folder in [`skills/`](skills/)
 contains a `SKILL.md`; Codex also uses its `agents/openai.yaml` sidecar. This repository
 is the source of truth, with changes reviewed through pull requests.
 
@@ -44,8 +44,9 @@ cd ~/secquoia-agent-skills
 ./install.sh
 ```
 
-A fresh default installation links skills into `~/.agents/skills` for Codex and
-`~/.claude/skills` for Claude Code. Start a fresh client session to pick them up.
+A fresh default installation links skills into `~/.agents/skills` for Codex,
+`~/.claude/skills` for Claude Code, and `~/.gemini/config/skills` for Antigravity
+(when `~/.gemini` exists or `--antigravity-hooks` is requested). Start a fresh client session to pick them up.
 Existing legacy installations remain supported; the installer selects the Codex
 root in this order:
 
@@ -90,12 +91,15 @@ Hooks are a per-machine opt-in, separate from installing skills:
 ```bash
 ./install.sh --codex-hooks                  # audit mode
 ./install.sh --claude-hooks                 # audit mode
+./install.sh --antigravity-hooks            # audit mode
 ./install.sh --codex-hooks=enforce          # optional enforcement
 ./install.sh --claude-hooks=enforce
+./install.sh --antigravity-hooks=enforce
 ```
 
 Codex handlers live in the selected Codex home's `hooks.json`; Claude handlers live
-in `~/.claude/settings.json`. Installation preserves unrelated hooks and settings,
+in `~/.claude/settings.json`; Antigravity handlers live in `~/.gemini/config/hooks.json`.
+Installation preserves unrelated hooks and settings,
 backs up changed files, and is repeatable with the same arguments. In Codex, review
 and trust the definition through `/hooks`; restart client sessions as needed.
 Generated commands retain the Python interpreter used during installation, with

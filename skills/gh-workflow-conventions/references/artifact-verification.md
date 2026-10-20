@@ -64,6 +64,13 @@ through a new version rather than silently relabeling their provenance.
 
 For changed visual content, inspect relevant rendered pages/figures; a successful
 build does not detect collisions, clipped labels, or wrong figure/caption pairings.
+For an instructional diagram or generated illustration, turn the intended claim
+into a short checklist of observable spatial or causal relationships: what must
+be inside, connected, aligned, upstream/downstream, or current versus future.
+Inspect every relationship at the final crop and delivery size, and compare with
+the last accepted asset for invariants that were not meant to change. Reject or
+regenerate a polished image when any listed relationship is wrong; corrected alt
+text, captions, or speaker notes cannot make an incorrect visual accurate.
 For unchanged-rendering claims, compare a baseline and candidate semantically and
 visually rather than interpreting timestamp-only binary differences as regressions.
 PDF layout claims require the actual class/fonts/spacing and ink bounds against the

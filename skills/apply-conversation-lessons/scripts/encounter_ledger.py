@@ -646,11 +646,13 @@ def _runtime_label(value: Any) -> str | None:
 def _payload_runtime(payload: dict[str, Any]) -> dict[str, str | None]:
     """Read only explicit top-level labels; do not infer from config or transcript."""
     values = {field: _runtime_label(payload.get(field)) for field in RUNTIME_FIELDS}
-    # Some hook clients expose the model under model_slug. Never traverse nested
+    # Some hook clients expose the model under model_slug or modelName. Never traverse nested
     # metadata or tool responses, which may contain prompt text and credentials.
     if values["model"] is None:
-        values["model"] = _runtime_label(payload.get("model_slug"))
-    event = payload.get("hook_event_name")
+        values["model"] = _runtime_label(
+            payload.get("model_slug") or payload.get("modelName")
+        )
+    event = payload.get("hook_event_name") or payload.get("hookEventName")
     values["event"] = (
         event
         if isinstance(event, str)
@@ -3521,9 +3523,15 @@ def _structured_failure(value: Any) -> bool:
 
 
 def _successful_response(payload: dict[str, Any], agent: str) -> bool:
-    event = str(payload.get("hook_event_name") or "")
+    event = str(
+        payload.get("hook_event_name") or payload.get("hookEventName") or ""
+    )
     if event == "PostToolUseFailure":
         return False
+    if agent == "antigravity":
+        error = payload.get("error")
+        exit_code = payload.get("exitCode") or payload.get("exit_code") or 0
+        return not bool(error or exit_code)
     response = payload.get("tool_response")
     if response is None:
         return False
@@ -3558,9 +3566,22 @@ def _successful_response(payload: dict[str, Any], agent: str) -> bool:
 
 
 def _payload_context(payload: dict[str, Any]) -> tuple[str, str, str]:
-    session_id = _runtime_id("session", payload.get("session_id") or "unknown-session")
-    cwd = str(payload.get("cwd") or os.getcwd())
-    event = str(payload.get("hook_event_name") or "")
+    session_id = _runtime_id(
+        "session",
+        payload.get("session_id")
+        or payload.get("conversationId")
+        or "unknown-session",
+    )
+    workspaces = payload.get("workspacePaths")
+    workspace_cwd = (
+        workspaces[0] if isinstance(workspaces, list) and workspaces else None
+    )
+    cwd = str(payload.get("cwd") or workspace_cwd or os.getcwd())
+    event = str(
+        payload.get("hook_event_name")
+        or payload.get("hookEventName")
+        or ""
+    )
     return session_id, cwd, event
 
 
@@ -3602,6 +3623,8 @@ def _advance_session_epoch(connection: sqlite3.Connection, session_id: str) -> N
 
 def _tool_use_id(payload: dict[str, Any]) -> str:
     value = payload.get("tool_use_id")
+    if not value and "stepIdx" in payload:
+        value = f"step-{payload['stepIdx']}"
     return _runtime_id("tool", value) if value else ""
 
 
@@ -3720,10 +3743,19 @@ def _mark_tool_event_completed(
 
 
 def _command_from_payload(payload: dict[str, Any]) -> str:
-    tool_input = payload.get("tool_input") or {}
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        tool_call = payload.get("toolCall")
+        if isinstance(tool_call, dict):
+            tool_input = tool_call.get("args")
     if not isinstance(tool_input, dict):
         return ""
-    return str(tool_input.get("command") or tool_input.get("cmd") or "")
+    return str(
+        tool_input.get("command")
+        or tool_input.get("cmd")
+        or tool_input.get("CommandLine")
+        or ""
+    )
 
 
 def _literal_git_push(arguments: list[_ShellWord]) -> bool:
@@ -4018,6 +4050,8 @@ def _pre_tool_use(
                         pending_summary=operation.summary,
                     )
     if not violations:
+        if agent == "antigravity":
+            return {"decision": "allow"}
         return None
     labels = ", ".join(sorted({operation.workflow_label for operation in violations}))
     unresolved = [
@@ -4038,6 +4072,8 @@ def _pre_tool_use(
         if unresolved:
             reason += " Some targets are unresolved; those checks are coverage gaps, not demonstrated violations."
     if mode == "enforce":
+        if agent == "antigravity":
+            return {"decision": "deny", "reason": reason}
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -4045,6 +4081,8 @@ def _pre_tool_use(
                 "permissionDecisionReason": reason,
             }
         }
+    if agent == "antigravity":
+        return {"decision": "allow", "reason": reason}
     warning = f"SECQUOIA audit ({INSTALLATION_ID}): {reason}"
     if agent == "codex":
         return {"systemMessage": warning}
@@ -4323,7 +4361,14 @@ def _stop(
         # re-entry after a prior block, and blocking again would loop an agent
         # that cannot perform the readback (for example, gh became
         # unavailable). The re-entry downgrades to an escape with an advisory.
-        already_continued = bool(payload.get("stop_hook_active"))
+        if agent == "antigravity":
+            already_continued = (
+                payload.get("executionNum", 1) > 1
+                or payload.get("terminationReason") in {"MAX_FORCED_INVOCATIONS", "USER_CANCELED", "ERROR"}
+                or bool(payload.get("stop_hook_active"))
+            )
+        else:
+            already_continued = bool(payload.get("stop_hook_active"))
         should_block = mode == "enforce" and not already_continued
         outcome = "prevented" if should_block else "escaped"
         for row in pending:
@@ -4365,7 +4410,11 @@ def _stop(
         if unresolved:
             reason += " Some targets are unresolved; those checks are coverage gaps, not demonstrated violations."
     if should_block:
+        if agent == "antigravity":
+            return {"decision": "continue", "reason": reason}
         return {"decision": "block", "reason": reason}
+    if agent == "antigravity":
+        return {"decision": "stop", "reason": reason}
     return {"systemMessage": f"SECQUOIA audit ({INSTALLATION_ID}): {reason}"}
 
 
@@ -4429,13 +4478,20 @@ def _session_start(
     if not labels:
         return None
     targets = ", ".join(labels)
+    warning = (
+        f"SECQUOIA audit ({INSTALLATION_ID}): Recovered an unverified "
+        f"GitHub write to {targets}. Re-read it before relying on its outcome."
+    )
+    if agent == "antigravity":
+        return {
+            "injectSteps": [
+                {"systemMessage": {"systemMessage": warning}}
+            ]
+        }
     return {
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
-            "additionalContext": (
-                f"SECQUOIA audit ({INSTALLATION_ID}): Recovered an unverified "
-                f"GitHub write to {targets}. Re-read it before relying on its outcome."
-            ),
+            "additionalContext": warning,
         }
     }
 
@@ -4723,6 +4779,120 @@ def uninstall_codex_hooks(
     return hooks_path, backup, True
 
 
+def _remove_owned_antigravity_hooks(
+    document: dict[str, Any], scripts: Iterable[Path] | None = None
+) -> bool:
+    allowed = {str(path.resolve()) for path in scripts} if scripts is not None else None
+
+    def removable(handler: Any) -> bool:
+        if not _owned_handler(handler):
+            return False
+        if allowed is None:
+            return True
+        try:
+            command = shlex.split(handler["command"])
+        except (TypeError, ValueError):
+            return False
+        return (
+            len(command) > 2
+            and command[2] == "hook"
+            and str(Path(command[1]).resolve()) in allowed
+        )
+
+    changed = False
+    for hook_name in list(document):
+        hook_spec = document[hook_name]
+        if not isinstance(hook_spec, dict):
+            continue
+        has_owned = False
+        all_removable = True
+        for event, handlers_or_groups in hook_spec.items():
+            if not isinstance(handlers_or_groups, list):
+                continue
+            for item in handlers_or_groups:
+                if isinstance(item, dict) and "hooks" in item:
+                    for h in item["hooks"]:
+                        if _owned_handler(h):
+                            has_owned = True
+                            if not removable(h):
+                                all_removable = False
+                        else:
+                            all_removable = False
+                elif isinstance(item, dict):
+                    if _owned_handler(item):
+                        has_owned = True
+                        if not removable(item):
+                            all_removable = False
+                    else:
+                        all_removable = False
+        if has_owned and all_removable:
+            del document[hook_name]
+            changed = True
+    return changed
+
+
+def _load_antigravity_hook_document(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8") as handle:
+        document = json.load(handle)
+    if not isinstance(document, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return document
+
+
+def install_antigravity_hooks(
+    hooks_path: Path, script: Path, mode: str
+) -> tuple[Path, Path | None]:
+    document = _load_antigravity_hook_document(hooks_path)
+    _remove_owned_antigravity_hooks(document)
+    base_command = (
+        f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} hook --agent antigravity "
+        f"--mode {mode} --installation-id {INSTALLATION_ID}"
+    )
+    hook_spec = {
+        "PreToolUse": [
+            {
+                "matcher": "run_command",
+                "hooks": [{"type": "command", "command": f"{base_command} --event PreToolUse", "timeout": 5}],
+            }
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "run_command",
+                "hooks": [{"type": "command", "command": f"{base_command} --event PostToolUse", "timeout": 5}],
+            }
+        ],
+        "SessionStart": [
+            {"type": "command", "command": f"{base_command} --event SessionStart", "timeout": 5}
+        ],
+        "Stop": [
+            {"type": "command", "command": f"{base_command} --event Stop", "timeout": 5}
+        ],
+    }
+    document["secquoia-hooks"] = hook_spec
+    rendered = json.dumps(document, indent=2, sort_keys=False) + "\n"
+    if hooks_path.exists() and hooks_path.read_text(encoding="utf-8") == rendered:
+        return hooks_path, None
+    backup = _backup_if_present(hooks_path)
+    _atomic_json_write(hooks_path, document)
+    return hooks_path, backup
+
+
+def uninstall_antigravity_hooks(
+    hooks_path: Path, scripts: Iterable[Path] | None = None
+) -> tuple[Path, Path | None, bool]:
+    if not hooks_path.exists():
+        return hooks_path, None, False
+    document = _load_antigravity_hook_document(hooks_path)
+    changed = _remove_owned_antigravity_hooks(document, scripts)
+    if not changed:
+        return hooks_path, None, False
+    backup = _backup_if_present(hooks_path)
+    _atomic_json_write(hooks_path, document)
+    return hooks_path, backup, True
+
+
 def _command_record(args: argparse.Namespace) -> int:
     connection = connect_database(args.state_dir)
     try:
@@ -4816,6 +4986,8 @@ def _command_hook(args: argparse.Namespace) -> int:
     if not isinstance(payload, dict):
         print("hook input must be a JSON object", file=sys.stderr)
         return 1
+    if getattr(args, "event", None):
+        payload.setdefault("hook_event_name", args.event)
     output = run_hook(
         payload,
         agent=args.agent,
@@ -4824,6 +4996,8 @@ def _command_hook(args: argparse.Namespace) -> int:
     )
     if output is not None:
         print(json.dumps(output, separators=(",", ":")))
+    elif args.agent == "antigravity":
+        print("{}")
     return 0
 
 
@@ -4864,10 +5038,11 @@ def build_parser() -> argparse.ArgumentParser:
     report.set_defaults(function=_command_report)
 
     hook = subparsers.add_parser(
-        "hook", help="consume one Codex or Claude hook event from stdin"
+        "hook", help="consume one Codex, Claude, or Antigravity hook event from stdin"
     )
     hook.add_argument("--agent", required=True)
     hook.add_argument("--mode", choices=("audit", "enforce"), default="audit")
+    hook.add_argument("--event")
     hook.add_argument("--state-dir")
     hook.add_argument(
         "--installation-id", default=INSTALLATION_ID, help=argparse.SUPPRESS
@@ -4957,6 +5132,50 @@ def build_parser() -> argparse.ArgumentParser:
         return 0
 
     claude_uninstall.set_defaults(function=command_uninstall_claude)
+
+    antigravity_install = subparsers.add_parser(
+        "install-antigravity-hooks", help="merge Antigravity hook handlers"
+    )
+    antigravity_install.add_argument("--hooks-path", type=Path, required=True)
+    antigravity_install.add_argument(
+        "--script", type=Path, default=Path(__file__).resolve()
+    )
+    antigravity_install.add_argument(
+        "--mode", choices=("audit", "enforce"), default="audit"
+    )
+
+    def command_install_antigravity(args: argparse.Namespace) -> int:
+        path, backup = install_antigravity_hooks(args.hooks_path, args.script, args.mode)
+        message = (
+            f"Installed Antigravity encounter hooks in {path} ({args.mode} mode)."
+        )
+        if backup:
+            message += f" Previous file backed up to {backup}."
+        print(message)
+        return 0
+
+    antigravity_install.set_defaults(function=command_install_antigravity)
+
+    antigravity_uninstall = subparsers.add_parser(
+        "uninstall-antigravity-hooks", help="remove owned Antigravity handlers"
+    )
+    antigravity_uninstall.add_argument("--hooks-path", type=Path, required=True)
+    antigravity_uninstall.add_argument(
+        "--script",
+        type=Path,
+        action="append",
+        help="remove only hooks for this script (repeatable)",
+    )
+
+    def command_uninstall_antigravity(args: argparse.Namespace) -> int:
+        path, backup, changed = uninstall_antigravity_hooks(args.hooks_path, args.script)
+        if changed:
+            print(f"Removed Antigravity encounter hooks from {path}; backup: {backup}.")
+        else:
+            print(f"No SECQUOIA encounter hooks found in {path}.")
+        return 0
+
+    antigravity_uninstall.set_defaults(function=command_uninstall_antigravity)
     return parser
 
 

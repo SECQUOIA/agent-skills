@@ -2876,6 +2876,209 @@ class EncounterLedgerTests(unittest.TestCase):
         ]
         self.assertEqual(remaining, ["python3 other.py"])
 
+    def test_antigravity_hook_install_is_idempotent_and_preserves_other_hooks(self):
+        hooks_path = Path(self.temporary.name) / "antigravity_hooks.json"
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "other-linter": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "run_command",
+                                "hooks": [{"command": "python3 lint.py"}],
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        script = Path("/opt/secquoia/encounter ledger.py")
+        ledger.install_antigravity_hooks(hooks_path, script, "audit")
+        ledger.install_antigravity_hooks(hooks_path, script, "audit")
+        document = json.loads(hooks_path.read_text(encoding="utf-8"))
+        self.assertIn("secquoia-hooks", document)
+        self.assertIn("other-linter", document)
+        secquoia = document["secquoia-hooks"]
+        self.assertEqual(
+            set(secquoia),
+            {"PreToolUse", "PostToolUse", "SessionStart", "Stop"},
+        )
+        self.assertEqual(secquoia["PreToolUse"][0]["matcher"], "run_command")
+        self.assertIn("'/opt/secquoia/encounter ledger.py'", secquoia["PreToolUse"][0]["hooks"][0]["command"])
+
+        _, _, changed = ledger.uninstall_antigravity_hooks(hooks_path)
+        self.assertTrue(changed)
+        updated = json.loads(hooks_path.read_text(encoding="utf-8"))
+        self.assertNotIn("secquoia-hooks", updated)
+        self.assertNotIn("hooks", updated)
+        self.assertIn("other-linter", updated)
+
+    def test_antigravity_payload_enforcement_and_audit(self):
+        state_dir = Path(self.temporary.name) / "antigravity_state"
+        # PreToolUse in enforce mode denies without live state read
+        payload_write = {
+            "conversationId": "ag-conv-123",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hook_event_name": "PreToolUse",
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "gh pr close 42"},
+            },
+            "stepIdx": 1,
+            "modelName": "gemini-4-argon",
+        }
+        res_enforce = ledger.run_hook(
+            payload_write, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_enforce["decision"], "deny")
+        self.assertIn("reason", res_enforce)
+
+        # PreToolUse in audit mode allows but includes warning reason
+        res_audit = ledger.run_hook(
+            payload_write, agent="antigravity", mode="audit", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_audit["decision"], "allow")
+        self.assertIn("reason", res_audit)
+
+        # Stop with pending unverified write asks to continue
+        payload_stop = {
+            "conversationId": "ag-conv-123",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hook_event_name": "Stop",
+            "executionNum": 1,
+            "terminationReason": "NO_TOOL_CALL",
+        }
+        res_stop = ledger.run_hook(
+            payload_stop, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_stop["decision"], "continue")
+
+        # Stop re-entry (executionNum > 1) does not loop-block in enforce mode
+        payload_stop_reentry = {
+            "conversationId": "ag-conv-123",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hook_event_name": "Stop",
+            "executionNum": 2,
+            "terminationReason": "NO_TOOL_CALL",
+        }
+        res_stop_reentry = ledger.run_hook(
+            payload_stop_reentry, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_stop_reentry["decision"], "stop")
+
+    def test_antigravity_full_lifecycle_sequence(self):
+        state_dir = Path(self.temporary.name) / "antigravity_lifecycle_state"
+        # 1. Preflight read via PostToolUse
+        read_payload = {
+            "conversationId": "ag-conv-lifecycle",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hook_event_name": "PostToolUse",
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "gh pr view 42 --repo owner/repo"},
+            },
+            "stepIdx": 1,
+        }
+        ledger.run_hook(
+            read_payload, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+
+        # 2. Write PreToolUse is allowed because preflight read was seen
+        write_pre = {
+            "conversationId": "ag-conv-lifecycle",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hook_event_name": "PreToolUse",
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "gh pr close 42 --repo owner/repo"},
+            },
+            "stepIdx": 2,
+        }
+        res_write_pre = ledger.run_hook(
+            write_pre, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_write_pre, {"decision": "allow"})
+
+        # 3. Write executes via PostToolUse
+        write_post = {
+            "conversationId": "ag-conv-lifecycle",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hook_event_name": "PostToolUse",
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "gh pr close 42 --repo owner/repo"},
+            },
+            "stepIdx": 2,
+        }
+        ledger.run_hook(
+            write_post, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+
+        # 4. Stop attempt before readback blocks
+        stop_payload = {
+            "conversationId": "ag-conv-lifecycle",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hook_event_name": "Stop",
+            "executionNum": 1,
+            "terminationReason": "NO_TOOL_CALL",
+        }
+        res_stop = ledger.run_hook(
+            stop_payload, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_stop["decision"], "continue")
+
+        # 5. Readback executes via PostToolUse
+        readback_post = {
+            "conversationId": "ag-conv-lifecycle",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hook_event_name": "PostToolUse",
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "gh pr view 42 --repo owner/repo"},
+            },
+            "stepIdx": 3,
+        }
+        ledger.run_hook(
+            readback_post, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+
+        # 6. Stop now succeeds without blocking
+        res_stop_ok = ledger.run_hook(
+            stop_payload, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_stop_ok, {})
+
+    def test_antigravity_session_start_inject_steps(self):
+        state_dir = Path(self.temporary.name) / "antigravity_session_state"
+        # Create unverified write in one session
+        write_post = {
+            "conversationId": "ag-conv-prev",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hook_event_name": "PostToolUse",
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "gh pr close 42"},
+            },
+            "stepIdx": 1,
+        }
+        ledger.run_hook(
+            write_post, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+
+        # SessionStart in that session recovers unverified write with injectSteps
+        session_start = {
+            "conversationId": "ag-conv-prev",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hook_event_name": "SessionStart",
+        }
+        res_start = ledger.run_hook(
+            session_start, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        self.assertIsNotNone(res_start)
+        self.assertIn("injectSteps", res_start)
+        self.assertIn("systemMessage", res_start["injectSteps"][0])
+
 
 def claude_payload(event: str, command: str = "", response=None, **extra):
     """A payload in the exact shape Claude Code v2.1.x sends: no turn_id, and
