@@ -364,7 +364,8 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual((foreign / "SKILL.md").read_text(), "foreign instructions")
 
     def test_antigravity_discovery_when_gemini_config_exists(self):
-        (self.home / ".gemini/config").mkdir(parents=True)
+        # Auto-detected when ~/.gemini exists (even before config/ is created)
+        (self.home / ".gemini").mkdir(parents=True)
         self.run_script("install")
         for root in (self.modern, self.claude, self.antigravity):
             self.assertEqual((root / "sample-skill").resolve(), self.source)
@@ -378,6 +379,7 @@ class InstallationTests(unittest.TestCase):
         self.assertTrue(hooks_file.is_file())
         data = json.loads(hooks_file.read_text())
         self.assertIn("secquoia-hooks", data)
+        self.assertNotIn("hooks", data)
         secquoia = data["secquoia-hooks"]
         self.assertIn("PreToolUse", secquoia)
         self.assertEqual(secquoia["PreToolUse"][0]["matcher"], "run_command")
@@ -387,6 +389,7 @@ class InstallationTests(unittest.TestCase):
         self.run_script("uninstall")
         updated_data = json.loads(hooks_file.read_text())
         self.assertNotIn("secquoia-hooks", updated_data)
+        self.assertNotIn("hooks", updated_data)
 
     def test_include_local_installs_private_skills(self):
         private = self.repo / "skills-local/private-skill"
@@ -397,7 +400,8 @@ class InstallationTests(unittest.TestCase):
             self.assertTrue((root / "private-skill").is_symlink())
             self.assertEqual((root / "private-skill").resolve(), private)
         self.run_script("uninstall")
-        self.assertFalse((self.modern / "private-skill").exists())
+        for root in (self.modern, self.claude):
+            self.assertFalse((root / "private-skill").exists())
 
 
 if __name__ == "__main__":

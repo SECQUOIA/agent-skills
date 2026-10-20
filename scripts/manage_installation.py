@@ -424,9 +424,11 @@ def main(argv: list[str] | None = None) -> int:
     antigravity_home = (
         args.antigravity_home or user_home / ".gemini" / "config"
     ).expanduser().resolve()
-    # Include Antigravity when its config root exists or hooks are requested.
+    # Include Antigravity when explicit, when ~/.gemini exists, or when config root exists or hooks are requested.
     include_antigravity = (
-        antigravity_home.is_dir()
+        args.antigravity_home is not None
+        or (user_home / ".gemini").is_dir()
+        or antigravity_home.is_dir()
         or args.antigravity_hooks is not None
     )
     source_roots = [repo / "skills"]

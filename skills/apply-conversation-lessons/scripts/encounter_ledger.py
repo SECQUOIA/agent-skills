@@ -3523,9 +3523,15 @@ def _structured_failure(value: Any) -> bool:
 
 
 def _successful_response(payload: dict[str, Any], agent: str) -> bool:
-    event = str(payload.get("hook_event_name") or "")
+    event = str(
+        payload.get("hook_event_name") or payload.get("hookEventName") or ""
+    )
     if event == "PostToolUseFailure":
         return False
+    if agent == "antigravity":
+        error = payload.get("error")
+        exit_code = payload.get("exitCode", payload.get("exit_code", 0))
+        return not bool(error or exit_code)
     response = payload.get("tool_response")
     if response is None:
         return False
@@ -4355,7 +4361,14 @@ def _stop(
         # re-entry after a prior block, and blocking again would loop an agent
         # that cannot perform the readback (for example, gh became
         # unavailable). The re-entry downgrades to an escape with an advisory.
-        already_continued = bool(payload.get("stop_hook_active"))
+        if agent == "antigravity":
+            already_continued = (
+                payload.get("executionNum", 1) > 1
+                or payload.get("terminationReason") in {"MAX_FORCED_INVOCATIONS", "USER_CANCELED", "ERROR"}
+                or bool(payload.get("stop_hook_active"))
+            )
+        else:
+            already_continued = bool(payload.get("stop_hook_active"))
         should_block = mode == "enforce" and not already_continued
         outcome = "prevented" if should_block else "escaped"
         for row in pending:
@@ -4465,13 +4478,20 @@ def _session_start(
     if not labels:
         return None
     targets = ", ".join(labels)
+    warning = (
+        f"SECQUOIA audit ({INSTALLATION_ID}): Recovered an unverified "
+        f"GitHub write to {targets}. Re-read it before relying on its outcome."
+    )
+    if agent == "antigravity":
+        return {
+            "injectSteps": [
+                {"systemMessage": {"systemMessage": warning}}
+            ]
+        }
     return {
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
-            "additionalContext": (
-                f"SECQUOIA audit ({INSTALLATION_ID}): Recovered an unverified "
-                f"GitHub write to {targets}. Re-read it before relying on its outcome."
-            ),
+            "additionalContext": warning,
         }
     }
 
@@ -4811,10 +4831,20 @@ def _remove_owned_antigravity_hooks(
     return changed
 
 
+def _load_antigravity_hook_document(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8") as handle:
+        document = json.load(handle)
+    if not isinstance(document, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return document
+
+
 def install_antigravity_hooks(
     hooks_path: Path, script: Path, mode: str
 ) -> tuple[Path, Path | None]:
-    document = _load_hook_document(hooks_path, {})
+    document = _load_antigravity_hook_document(hooks_path)
     _remove_owned_antigravity_hooks(document)
     base_command = (
         f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} hook --agent antigravity "
@@ -4854,7 +4884,7 @@ def uninstall_antigravity_hooks(
 ) -> tuple[Path, Path | None, bool]:
     if not hooks_path.exists():
         return hooks_path, None, False
-    document = _load_hook_document(hooks_path, {})
+    document = _load_antigravity_hook_document(hooks_path)
     changed = _remove_owned_antigravity_hooks(document, scripts)
     if not changed:
         return hooks_path, None, False
