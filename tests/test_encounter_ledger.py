@@ -2876,6 +2876,83 @@ class EncounterLedgerTests(unittest.TestCase):
         ]
         self.assertEqual(remaining, ["python3 other.py"])
 
+    def test_antigravity_hook_install_is_idempotent_and_preserves_other_hooks(self):
+        hooks_path = Path(self.temporary.name) / "antigravity_hooks.json"
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "other-linter": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "run_command",
+                                "hooks": [{"command": "python3 lint.py"}],
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        script = Path("/opt/secquoia/encounter ledger.py")
+        ledger.install_antigravity_hooks(hooks_path, script, "audit")
+        ledger.install_antigravity_hooks(hooks_path, script, "audit")
+        document = json.loads(hooks_path.read_text(encoding="utf-8"))
+        self.assertIn("secquoia-hooks", document)
+        self.assertIn("other-linter", document)
+        secquoia = document["secquoia-hooks"]
+        self.assertEqual(
+            set(secquoia),
+            {"PreToolUse", "PostToolUse", "SessionStart", "Stop"},
+        )
+        self.assertEqual(secquoia["PreToolUse"][0]["matcher"], "run_command")
+        self.assertIn("'/opt/secquoia/encounter ledger.py'", secquoia["PreToolUse"][0]["hooks"][0]["command"])
+
+        _, _, changed = ledger.uninstall_antigravity_hooks(hooks_path)
+        self.assertTrue(changed)
+        updated = json.loads(hooks_path.read_text(encoding="utf-8"))
+        self.assertNotIn("secquoia-hooks", updated)
+        self.assertIn("other-linter", updated)
+
+    def test_antigravity_payload_enforcement_and_audit(self):
+        state_dir = Path(self.temporary.name) / "antigravity_state"
+        # PreToolUse in enforce mode denies without live state read
+        payload_write = {
+            "conversationId": "ag-conv-123",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hook_event_name": "PreToolUse",
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "gh pr close 42"},
+            },
+            "stepIdx": 1,
+            "modelName": "gemini-4-argon",
+        }
+        res_enforce = ledger.run_hook(
+            payload_write, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_enforce["decision"], "deny")
+        self.assertIn("reason", res_enforce)
+
+        # PreToolUse in audit mode allows but includes warning reason
+        res_audit = ledger.run_hook(
+            payload_write, agent="antigravity", mode="audit", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_audit["decision"], "allow")
+        self.assertIn("reason", res_audit)
+
+        # Stop with pending unverified write asks to continue
+        payload_stop = {
+            "conversationId": "ag-conv-123",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hook_event_name": "Stop",
+            "executionNum": 1,
+            "terminationReason": "NO_TOOL_CALL",
+        }
+        res_stop = ledger.run_hook(
+            payload_stop, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_stop["decision"], "continue")
+
 
 def claude_payload(event: str, command: str = "", response=None, **extra):
     """A payload in the exact shape Claude Code v2.1.x sends: no turn_id, and

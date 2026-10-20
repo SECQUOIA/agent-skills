@@ -65,7 +65,9 @@ target changes, and cancellation to affected workers before relying on their wor
 
 For parallel edits, prefer separate worktrees/branches at the agreed source using
 [checkout guidance](worktrees-and-checkouts.md). Each worker owns its local edits;
-the coordinator integrates them. If intentionally sharing a checkout, assign
+the coordinator integrates them. In Antigravity, invoking `invoke_subagent` with
+`Workspace: "branch"` or `Workspace: "share"` provides this isolation natively.
+If intentionally sharing a checkout, assign
 nonoverlapping paths and one owner of its index, branch changes, and commits.
 Different files still share Git state: never switch/rebase that checkout or stage
 another worker's in-progress files while workers use it. Stop and repartition an

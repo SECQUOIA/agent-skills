@@ -6,11 +6,11 @@ These are candidate starting points, not measured SECQUOIA optima or minimum
 requirements. Preserve explicit user model/effort choices; this mapping does not
 switch the primary agent automatically.
 
-| Workload | Codex candidate | Claude Code candidate |
-|---|---|---|
-| Ordinary | GPT-6.1 Sol, `medium` | Opus 5.5, `medium` |
-| Substantive | GPT-6.1 Sol, `high` | Opus 5.5, `high` |
-| Exceptional | Evaluate GPT-6 Astra at `high` or `xhigh` when justified | Retain Opus 5.5 at `high` pending comparison; candidates: `xhigh`, or Fable 5.1 when available and within billing authorization |
+| Workload | Codex candidate | Claude Code candidate | Antigravity candidate |
+|---|---|---|---|
+| Ordinary | GPT-6.1 Sol, `medium` | Opus 5.5, `medium` | Gemini 3.8 Flash |
+| Substantive | GPT-6.1 Sol, `high` | Opus 5.5, `high` | Gemini 3.8 Flash (High) or Gemini 3.8 Pro |
+| Exceptional | Evaluate GPT-6 Astra at `high` or `xhigh` when justified | Retain Opus 5.5 at `high` pending comparison; candidates: `xhigh`, or Fable 5.1 when available and within billing authorization | Gemini 4 Argon / Gemini 3.8 Pro |
 
 Effort labels are not equivalent across models or vendors. Compare representative
 tasks before claiming a gain from `xhigh` or higher effort; an existing setting is
@@ -74,6 +74,18 @@ Session model/effort controls and saved per-model settings belong to the client.
 The `ultrathink` keyword adds an instruction for that turn; it does **not** change
 the effort value sent to the API. See
 [Claude model and effort controls](https://code.claude.com/docs/en/model-config).
+
+## Antigravity controls
+
+Antigravity executes commands through `run_command` in a secure sandbox by default.
+Commands requiring external network access (such as `gh` issue/PR interactions or git remote operations) require sandbox network permission or running with elevated permission (`BypassSandbox: true`). Use standard sandbox execution first unless external network access is strictly necessary.
+
+Subagents in Antigravity are invoked via `invoke_subagent` with explicit parameters:
+- `Model`: `inherit`, `flash_lite`, `flash`, or `pro` (use `pro` for frontier reasoning review and complex verification tasks such as Argon 4 / Gemini 4 Argon, and `flash` / `flash_lite` for bounded triage or research).
+- `Workspace`: `inherit`, `branch` (isolated copy/branch), or `share` (shared git worktree).
+- Coordinator-worker communication uses `send_message` with reactive notifications (no polling needed).
+
+Skills are discovered via `~/.gemini/config/skills/` globally, `.agents/skills/` in workspaces, or declared in `skills.json`. Lifecycle hooks live in `~/.gemini/config/hooks.json` or `.agents/hooks.json` under named hook keys matching tool `run_command`.
 
 ## Applying and reporting a request
 

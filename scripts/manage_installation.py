@@ -3,7 +3,9 @@
 
 Fresh default installs use ~/.agents/skills. Existing legacy installs and explicit
 custom CODEX_HOME roots keep their location. Hooks always live in CODEX_HOME.
-Copy ownership is recorded per skill; unmarked copies require manual inspection.
+Antigravity skills install to ~/.gemini/config/skills when ~/.gemini exists or
+--antigravity-hooks is requested. Copy ownership is recorded per skill; unmarked
+copies require manual inspection.
 """
 
 from __future__ import annotations
@@ -51,15 +53,16 @@ def skills(source_root: Path) -> list[Path]:
     )
 
 
-def retired_entries(root: Path, source_root: Path) -> list[Path]:
+def retired_entries(root: Path, source_root: Path | list[Path]) -> list[Path]:
     """Recognize only absent source paths with this checkout's exact provenance."""
     if not root.is_dir():
         return []
+    roots = [source_root] if isinstance(source_root, Path) else source_root
     return [
         destination
         for destination in sorted(root.iterdir())
-        if not present(source_root / destination.name)
-        and owned(destination, source_root / destination.name)
+        if not any(present(r / destination.name) for r in roots)
+        and any(owned(destination, r / destination.name) for r in roots)
     ]
 
 
@@ -216,6 +219,9 @@ def run_hooks(
     claude_home: Path,
     codex_skills: Path,
     args: argparse.Namespace,
+    *,
+    antigravity_home: Path | None = None,
+    antigravity_skills: Path | None = None,
 ) -> None:
     relative = Path("apply-conversation-lessons/scripts/encounter_ledger.py")
     source_script = repo / "skills" / relative
@@ -250,6 +256,17 @@ def run_hooks(
                 *script_options([claude_home / "skills"]),
             ],
         ]
+        if antigravity_home is not None:
+            roots = [antigravity_skills] if antigravity_skills else []
+            commands.append(
+                [
+                    str(source_script),
+                    "uninstall-antigravity-hooks",
+                    "--hooks-path",
+                    str(antigravity_home / "hooks.json"),
+                    *script_options(roots),
+                ]
+            )
     else:
         commands = []
         if args.codex_hooks:
@@ -280,12 +297,32 @@ def run_hooks(
                     args.claude_hooks,
                 ]
             )
+        if getattr(args, "antigravity_hooks", None) and antigravity_skills:
+            script = antigravity_skills / relative
+            commands.append(
+                [
+                    str(script),
+                    "install-antigravity-hooks",
+                    "--hooks-path",
+                    str(antigravity_home / "hooks.json"),
+                    "--script",
+                    str(script),
+                    "--mode",
+                    args.antigravity_hooks,
+                ]
+            )
     if source_script.is_file():
         for command in commands:
             subprocess.run([sys.executable, *command], check=True)
 
 
-def install(repo: Path, sources: list[Path], targets: list[Path], copy: bool) -> None:
+def install(
+    repo: Path,
+    sources: list[Path],
+    targets: list[Path],
+    copy: bool,
+    source_roots: list[Path] | None = None,
+) -> None:
     # Check every target before making any change, including Claude conflicts.
     for root in targets:
         for source in sources:
@@ -296,8 +333,9 @@ def install(repo: Path, sources: list[Path], targets: list[Path], copy: bool) ->
                     "Inspect and move it outside discovery before installing."
                 )
     revision = installed_revision(repo)
+    roots = source_roots if source_roots is not None else [repo / "skills"]
     for root in targets:
-        prune_retired(root, repo / "skills")
+        prune_retired(root, roots)
         print(f"Installing into {root} ({'copy' if copy else 'symlink'}).")
         for source in sources:
             install_skill(source, root, copy=copy, revision=revision)
@@ -314,9 +352,12 @@ def install(repo: Path, sources: list[Path], targets: list[Path], copy: bool) ->
             guard.chmod(guard.stat().st_mode | 0o111)
 
 
-def uninstall(source_root: Path, sources: list[Path], targets: list[Path]) -> None:
+def uninstall(
+    source_root: Path | list[Path], sources: list[Path], targets: list[Path]
+) -> None:
+    roots = source_root if isinstance(source_root, list) else [source_root]
     for root in targets:
-        prune_retired(root, source_root)
+        prune_retired(root, roots)
         for source in sources:
             destination = root / source.name
             if not present(destination):
@@ -357,6 +398,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--claude-hooks", nargs="?", const="audit", choices=("audit", "enforce")
     )
+    parser.add_argument(
+        "--antigravity-home",
+        type=Path,
+        help="Antigravity config root; defaults to ~/.gemini/config",
+    )
+    parser.add_argument(
+        "--antigravity-hooks", nargs="?", const="audit", choices=("audit", "enforce")
+    )
+    parser.add_argument(
+        "--include-local",
+        action="store_true",
+        help="also install private skills from skills-local if present",
+    )
     args = parser.parse_args(argv)
     repo = Path(__file__).resolve().parents[1]
     user_home = (args.user_home or Path.home()).expanduser().resolve()
@@ -367,7 +421,18 @@ def main(argv: list[str] | None = None) -> int:
     codex_home = Path(configured_home or user_home / ".codex").expanduser().resolve()
     custom_home = codex_home != user_home / ".codex"
     claude_home = user_home / ".claude"
-    sources = skills(repo / "skills")
+    antigravity_home = (
+        args.antigravity_home or user_home / ".gemini" / "config"
+    ).expanduser().resolve()
+    # Include Antigravity when its config root exists or hooks are requested.
+    include_antigravity = (
+        antigravity_home.is_dir()
+        or args.antigravity_hooks is not None
+    )
+    source_roots = [repo / "skills"]
+    if getattr(args, "include_local", False) and (repo / "skills-local").is_dir():
+        source_roots.append(repo / "skills-local")
+    sources = [s for root in source_roots for s in skills(root)]
     try:
         if args.action == "install":
             selected, _ = codex_root(
@@ -379,10 +444,22 @@ def main(argv: list[str] | None = None) -> int:
                 custom_home=custom_home,
             )
             targets = unique_roots([selected, claude_home / "skills"])
-            install(repo, sources, targets, args.copy)
-            run_hooks(repo, args.action, codex_home, claude_home, selected, args)
+            antigravity_skills = None
+            if include_antigravity:
+                antigravity_skills = antigravity_home / "skills"
+                targets = unique_roots(targets + [antigravity_skills])
+            install(repo, sources, targets, args.copy, source_roots=source_roots)
+            run_hooks(
+                repo, args.action, codex_home, claude_home, selected, args,
+                antigravity_home=antigravity_home if include_antigravity else None,
+                antigravity_skills=antigravity_skills,
+            )
+            clients = ["Codex", "Claude"]
+            if include_antigravity:
+                clients.append("Antigravity")
             print(
-                "Done. Start a fresh Codex/Claude session to discover the installed skills."
+                f"Done. Start a fresh {'/'.join(clients)} session to discover"
+                " the installed skills."
             )
             if args.codex_hooks:
                 print(
@@ -390,16 +467,30 @@ def main(argv: list[str] | None = None) -> int:
                 )
         else:
             selected = args.codex_skills_dir or user_home / ".agents" / "skills"
+            antigravity_skills = (
+                antigravity_home / "skills"
+                if include_antigravity or (antigravity_home / "skills").exists()
+                else None
+            )
             targets = unique_roots(
                 [
                     selected,
                     user_home / ".agents" / "skills",
                     codex_home / "skills",
                     claude_home / "skills",
+                    *( [antigravity_skills] if antigravity_skills else [] ),
                 ]
             )
-            run_hooks(repo, args.action, codex_home, claude_home, selected, args)
-            uninstall(repo / "skills", sources, targets)
+            run_hooks(
+                repo, args.action, codex_home, claude_home, selected, args,
+                antigravity_home=antigravity_home if include_antigravity or (antigravity_home / "hooks.json").exists() else None,
+                antigravity_skills=antigravity_skills,
+            )
+            uninstall_source_roots = [repo / "skills"]
+            if (repo / "skills-local").is_dir():
+                uninstall_source_roots.append(repo / "skills-local")
+            uninstall_sources = [s for root in uninstall_source_roots for s in skills(root)]
+            uninstall(uninstall_source_roots, uninstall_sources, targets)
             print("Done. Unowned entries and changed copies were preserved.")
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"Installation error: {error}", file=sys.stderr)

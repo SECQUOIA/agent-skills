@@ -53,6 +53,10 @@ class InstallationTests(unittest.TestCase):
     def claude(self):
         return self.home / ".claude/skills"
 
+    @property
+    def antigravity(self):
+        return self.home / ".gemini/config/skills"
+
     def run_script(self, action="install", *arguments, expected=0):
         result = subprocess.run(
             [
@@ -358,6 +362,42 @@ class InstallationTests(unittest.TestCase):
             self.assertTrue((root / "sample-skill/SKILL.md").is_file())
         self.assertEqual(list(self.home.rglob(".secquoia-skill-backups")), [])
         self.assertEqual((foreign / "SKILL.md").read_text(), "foreign instructions")
+
+    def test_antigravity_discovery_when_gemini_config_exists(self):
+        (self.home / ".gemini/config").mkdir(parents=True)
+        self.run_script("install")
+        for root in (self.modern, self.claude, self.antigravity):
+            self.assertEqual((root / "sample-skill").resolve(), self.source)
+            self.assertTrue((root / "apply-conversation-lessons").is_symlink())
+        self.run_script("uninstall")
+        self.assertFalse((self.antigravity / "sample-skill").exists())
+
+    def test_antigravity_hooks_installation_and_uninstallation(self):
+        self.run_script("install", "--antigravity-hooks=audit")
+        hooks_file = self.home / ".gemini/config/hooks.json"
+        self.assertTrue(hooks_file.is_file())
+        data = json.loads(hooks_file.read_text())
+        self.assertIn("secquoia-hooks", data)
+        secquoia = data["secquoia-hooks"]
+        self.assertIn("PreToolUse", secquoia)
+        self.assertEqual(secquoia["PreToolUse"][0]["matcher"], "run_command")
+        self.assertIn("PostToolUse", secquoia)
+        self.assertIn("SessionStart", secquoia)
+        self.assertIn("Stop", secquoia)
+        self.run_script("uninstall")
+        updated_data = json.loads(hooks_file.read_text())
+        self.assertNotIn("secquoia-hooks", updated_data)
+
+    def test_include_local_installs_private_skills(self):
+        private = self.repo / "skills-local/private-skill"
+        private.mkdir(parents=True)
+        (private / "SKILL.md").write_text("---\nname: private-skill\ndescription: private\n---\n")
+        self.run_script("install", "--include-local")
+        for root in (self.modern, self.claude):
+            self.assertTrue((root / "private-skill").is_symlink())
+            self.assertEqual((root / "private-skill").resolve(), private)
+        self.run_script("uninstall")
+        self.assertFalse((self.modern / "private-skill").exists())
 
 
 if __name__ == "__main__":
