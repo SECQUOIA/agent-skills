@@ -2782,7 +2782,7 @@ class EncounterLedgerTests(unittest.TestCase):
             "/tmp",
         )[0]
 
-        self.assertEqual(selected_query.kind, "unknown")
+        self.assertEqual(selected_query.kind, "read")
         self.assertFalse(selected_query.read_eligible)
         self.assertEqual(selected_mutation.kind, "write")
         self.assertFalse(selected_mutation.read_eligible)
@@ -2790,6 +2790,28 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertEqual(named_mutation.kind, "read")
         self.assertEqual(fragment_named_mutation.kind, "read")
         self.assertEqual(anonymous_directive.kind, "read")
+
+    def test_hook_interpreter_and_script_paths_with_spaces_are_quoted_and_owned(self):
+        script = Path("/opt/SECQUOIA Tools/encounter ledger.py")
+        executable = "/opt/Python Tools/python3"
+        for agent in ("codex", "claude"):
+            with self.subTest(agent=agent):
+                root = Path(self.temporary.name) / agent
+                with mock.patch.object(ledger.sys, "executable", executable):
+                    if agent == "codex":
+                        path, _ = ledger.install_codex_hooks(root, script, "audit")
+                    else:
+                        path, _ = ledger.install_claude_hooks(root / "settings.json", script, "audit")
+                document = json.loads(path.read_text())
+                handlers = [handler for groups in document["hooks"].values()
+                            for group in groups for handler in group["hooks"]]
+                for handler in handlers:
+                    self.assertEqual(shlex.split(handler["command"])[:3],
+                                     [executable, str(script), "hook"])
+                    self.assertTrue(ledger._owned_handler(handler))
+                self.assertFalse(ledger._remove_owned_hooks(document, [Path("/another/script.py")]))
+                self.assertTrue(ledger._remove_owned_hooks(document, [script]))
+                self.assertEqual(document["hooks"], {})
 
     def test_codex_hook_install_is_idempotent_and_preserves_other_hooks(self):
         codex_home = Path(self.temporary.name) / "codex"

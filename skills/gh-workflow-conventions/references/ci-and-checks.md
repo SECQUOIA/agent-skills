@@ -1,43 +1,158 @@
-# CI And Checks Observation
+# CI and Checks
 
-Part of **gh-workflow-conventions**. Read this before interpreting CI, checks, statuses, reruns, workflow files, or merge gates.
+Use when judging checks, reruns, required gates, or workflow changes. CI evidence
+belongs to a repository, exact head SHA, event, run, and attempt.
 
-- Require CI/status data for the current `headRefOid`; do not rely on checks from an older commit after a push. Re-resolve `headRefOid` fresh at the start of each skill and apply it to ref-pinned content reads (`gh api .../contents/<path>?ref=<sha>`, `git show <sha>:<path>`) too, not just CI checks — do not reuse a SHA carried over from an earlier step or a prior skill's review sentinel, since the remote head can advance between back-to-back skill invocations in one session (for example a review pass followed by a resolution-verification pass, with the author pushing new commits in between).
-- Immediately after a successful push, if `gh pr view --json headRefOid,statusCheckRollup` still reports the previous head SHA, do not assume the push failed or watch old checks. Verify the branch ref with `git ls-remote` and the PR head with the narrow REST pulls endpoint, then use the confirmed SHA for check-run inspection while the higher-level PR view catches up.
-- Do not assume `gh pr checks` has a JSON mode; some `gh` versions reject `--json` for that subcommand. For structured check data, read `gh pr view --json statusCheckRollup` and `gh run list --branch <head>`; use plain `gh pr checks` only for human-readable confirmation or its "no checks reported" signal.
-- If `gh pr checks --watch` (or `gh pr checks`) reports no checks immediately after a push or PR creation, poll `gh run list --branch <head>` and `gh pr view --json statusCheckRollup` before concluding that no CI is configured. In that state `--watch` exits immediately (and with status 0) instead of waiting for checks to register, so do not chain it directly after `gh pr create`/`git push` in one command — the "watch" silently degrades to a no-op that reads as a completed green run. Poll until the head's checks appear, then start the bounded watch as its own command. An unsupported flag produces the identical no-op through a different route: `gh` builds vary, and one that does not recognize an option on `gh run watch`/`gh pr checks` prints its usage text and exits 0 without ever watching, so `--exit-status` reports success for a run that may still be in progress or already failed. This is more dangerous than the flags that are rejected loudly elsewhere in these conventions, because the exit code is the thing being trusted. Never accept a watch's exit status alone as the verdict: follow every watch with a separate state read (`gh run view <run-id> --json status,conclusion` or the commit check-runs endpoint) and report that, and when a watch returns far faster than the run could have finished, re-read its output for a usage block, or for job URLs belonging to the *previous* head, before treating it as green. That second variant is the one that survives a careful read: chained directly after a push, the watch can bind to the outgoing head's already-completed runs and print green rows with real durations and real job links, so nothing in the output looks degraded. Only a head-scoped read separates it from a genuine pass — `gh api repos/{owner}/{repo}/commits/<new-sha>/check-runs` reports the new head still `queued`/`in_progress` while the watch calls it green.
-- Checks can also never arrive. A push GitHub fully accepted — the PR head SHA advanced and `git ls-remote` agrees — can still create no check suite at all even when the repository has a matching `pull_request` workflow and other branches run normally. After a bounded wait, confirm with `gh api repos/{owner}/{repo}/commits/<sha>/check-suites --jq .total_count`; if it is still zero, preserve "CI did not trigger for this head" as its own outcome, distinct from pending, green, and red. When the task authorizes manual verification and the exact-head workflow declares `workflow_dispatch`, a dispatch may supply separate evidence: apply the event-gating rule below, verify the run's `.headSha` and every intended job, and report those results separately. A green dispatch can leave the PR's `statusCheckRollup` empty and does not prove that the missing `pull_request` suite triggered or that required PR contexts were satisfied. Do not let local test results stand in for the missing run.
-- A nonzero check-suite count is not proof that a check is executing. When a current-head suite remains `queued` or `in_progress` with zero CheckRuns while `statusCheckRollup`, `gh pr checks`, and Actions runs expose nothing, inspect the suite app, status, conclusion, and `latest_check_runs_count` after a bounded wait. Independently determine whether any exact-head workflow should run for this event or any code-CI context is required: if either expected result has not surfaced, classify code CI as unsurfaced/pending and do not merge, regardless of an unrelated inert suite. Only when no code-CI producer is expected and no code-CI context is required may a zero-run downstream integration suite be classified as inert; report code CI as absent/not reported rather than green or executing, report the suite separately, and do not wait indefinitely for it to transition.
-- If the current-head rollup contains only external `StatusContext` entries and both Actions runs and `CheckRun` entries are absent (common on fork drafts awaiting maintainer approval), classify code CI as not surfaced or gated and report the external statuses separately. Do not call the PR green or failed; after bounded confirmation that no code run exists, stop streaming an indefinitely pending external context and report the gate.
-- After changing a PR from draft to ready, immediately re-read `statusCheckRollup` and inspect the exact-head workflow triggers before waiting. A `pull_request` trigger with no `types` uses GitHub's default `opened`, `synchronize`, and `reopened` set, which excludes `ready_for_review`; do not poll for a transition run the workflow cannot emit, and retain the current-head checks as the applicable evidence. When a workflow does subscribe to `ready_for_review`, wait for its new run: an unchanged head SHA does not mean the previously green rollup is still complete. GitHub can retain pre-transition and post-transition check runs with the same name on that SHA; when duplicate names appear, group entries by the workflow run ID in each `detailsUrl`, inspect their creation time and state with `gh run view`, and require the newest run set created after the ready transition. An older `SUCCESS` or `SKIPPED` entry is historical and neither satisfies nor blocks the new run.
-- If `gh run list --branch <head>` lags or shows only old head SHAs while `statusCheckRollup` already contains queued or in-progress check runs for the current `headRefOid`, trust the rollup for current CI state and inspect the run IDs from its check `detailsUrl`s.
-- If `gh pr checks --watch` repeatedly reports a job as `pending` with zero elapsed time even though it has a run/job URL, stop that watch and inspect the underlying run with `gh run view <run-id> --json status,conclusion,jobs`; use `gh run watch <run-id> --exit-status` only when a bounded run-level stream is still useful. Do this before treating the job as queued, stuck, or absent.
-- For optional or post-merge Actions status samples, prefer `gh run list` first and wrap any nonessential `gh run view <run-id> --json ...` call in a short external `timeout`; a run-detail read can hang even though it is not a watch. If it times out, report the narrower run-list evidence instead of leaving the command running.
-- For long Actions watches, prefer bounded polling with `gh run view <run-id> --json status,conclusion,jobs` after the first inspection when `gh run watch` output is noisy or repetitive. Poll at intervals rather than streaming indefinitely. When only state transitions matter, compact large matrices with `--jq '{status,conclusion,jobs:[.jobs[]|{name,status,conclusion}]}'` instead of dumping every job step on each poll.
-- During an `in_progress` Actions job, `gh run view` and `gh run watch` may expose later job steps only as execution reaches them. A missing downstream step is not evidence that the workflow omitted it: compare the workflow file at the exact head, and wait for the completed run before concluding a required step never ran.
-- `statusCheckRollup` mixes two node types: a `CheckRun` carries `.status` (e.g. `COMPLETED`) and `.conclusion` (e.g. `SUCCESS`), while a `StatusContext` (external statuses such as `documenter/deploy` or Codecov) carries `.state` and has a `null` `.status`. A completion filter keyed only on `.status` treats every `StatusContext` as perpetually pending, so a bounded poll loop runs to its full timeout (exit 124) even after all checks concluded. Treat a node as finished when a `CheckRun`'s `.status == "COMPLETED"` or a `StatusContext`'s `.state` is terminal (`SUCCESS`/`FAILURE`/`ERROR`), and read the verdict as `.conclusion // .state`.
-- For commit check-run details, prefer `gh api repos/{owner}/{repo}/commits/{sha}/check-runs`; the repository-level `check-runs` endpoint with `head_sha` can require GitHub App authentication and return 403 even when the commit-scoped read works with the normal `gh` token.
-- If a GitHub Actions job completes as `cancelled` or the run concludes `failure` before the job acquires a runner, inspect job metadata, logs, and annotations before proposing code changes. A job with no steps, empty `runner_name`, `log not found`, and an annotation such as "not acquired by Runner of type hosted" is infrastructure/queue cancellation; rerun failed jobs with `gh run rerun <run-id> --failed` when authorized, then watch the new attempt and report the rerun result.
-- After `gh run rerun <run-id> --failed`, read the run's `run_attempt` and poll `repos/{owner}/{repo}/actions/runs/{run-id}/jobs?filter=latest`; use only the latest-attempt job IDs and pass `--attempt <N>` when reading logs. Do not mix failures from an earlier attempt with the current rerun or infer completion from carried-forward successful jobs.
-- A green `workflow_dispatch` run does not prove a deploy gated on `github.event_name == 'push'` or a specific ref executed. Check event/ref conditions and the intended job's own conclusion. After fixing an external prerequisite (Pages enabled, secret added, permission granted), rerun the original qualifying event; prefer a full `gh run rerun <run-id>` over `--failed` when deployment consumes an earlier job's artifact, which may be absent or expired.
-- Before enabling merges made with `GITHUB_TOKEN`, trace the post-merge publishing path: [GitHub suppresses push-triggered workflows from that token](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow). A successful bot merge can leave CI green and the published site stale. Use an authorized event path, such as an explicit `workflow_dispatch` after confirming the matching PR head actually merged; run only trusted base code in any privileged listener. Verify a real automatic merge through the intended deployment at its merge SHA (or an explicitly identified newer base SHA). An enabler job passing proves neither merge nor publication.
-- Do not use `repos/{owner}/{repo}/commits/{sha}/status` as an Actions verdict. That combined-status endpoint contains legacy commit statuses, not Checks API `CheckRun`s, so it can return `pending` with an empty `.statuses` array while every Actions job passed. Use the PR's `statusCheckRollup`, `gh run list`/`view`, or the commit check-runs endpoint instead.
-- Distinguish intentional `SKIPPED` checks from failures and report distinct workflows (CI, docs, deploy, Dependabot) separately. Before citing CI as coverage for a defect class, read each relevant gate's triggers at the current head and match them against this event. A link, schema, or accessibility checker scoped only to `schedule` or `workflow_dispatch` leaves no PR job or rollup entry; report that absent coverage even when every surfaced lane passes.
-- For GitHub Pages changes that depend on builder versions, plugins, or template features, compare live Pages `build_type` and source (`gh api repos/{owner}/{repo}/pages`) with the declared dependencies and publishing workflows before treating PR CI as deployment coverage. The generated legacy `pages build and deployment` job can coexist with custom Actions and use a different runtime despite having no file in `.github/workflows`. Inspect each publisher's logs: a green custom build does not validate the legacy builder, and a failed duplicate builder does not prove the site failed to publish. Establish the intended publisher from repository policy; when configuration repair is authorized, align the Pages source with it (for custom Actions, `build_type: workflow`) instead of rewriting valid content for an unintended runtime. Verify the selected deployment and live content, and distinguish a successful repair from historical failed runs.
-- A lane's green badge is not proof its steps ran. A job carrying `continue-on-error`, or one the repository's own docs describe as non-blocking, reports `SUCCESS` even when its install step failed or its tests never executed — the usual shape for optional lanes covering a licensed solver, an extra backend, or a paid service. A workflow that gates its heavy steps on `github.event.pull_request.draft` does the same on every draft PR: the lane concludes `SUCCESS` in seconds while its log reads only `skipped: draft PR`. That one is easy to walk into, because opening a draft is this workflow's own default and the readiness rule then keys on "CI is green" — a green no test produced. Treat a heavy lane that concludes in seconds as the tell, and re-verify the lanes after the ready-for-review transition rather than carrying a draft-state result forward. That matters most when the lane is the *only* place the PR's changed behavior is exercised, because every other check can be green without touching it. Before citing such a lane as evidence, read its log and confirm the specific tests ran and passed (`gh api repos/{owner}/{repo}/actions/jobs/{job_id}/logs`, filtered to the node IDs you expect); grep the repo's contributor docs for which lanes are non-blocking rather than inferring it from the rollup. Report what you verified in the log, not that the lane is green.
-- A green docs/generated-site build can still introduce warning regressions the exit code hides: when the builder runs warn-only (Documenter `warnonly`, Sphinx without `-W`), missing-docstring lists (`N docstrings not included in the manual`), unresolved cross-references, and orphaned pages surface only in the build log. When a PR adds exported symbols, public attributes, or docs pages, fetch the docs workflow logs for both the PR head and the base branch's latest run and diff the warning lines: a warning present at head but absent at base is a PR-introduced regression and a finding even with every check green, and the fix is verified the same way — the head's warning set returning to the base's.
-- If a downstream status such as Codecov fails because the report-producing workflow is intentionally label-gated or skipped, do not edit tests or workflows merely to satisfy the downstream status. Verify the skipped producer job, try the required label through `gh pr edit --add-label`, and if that trips a deprecated Projects/classic-field failure, retry the issue-label REST endpoint; on a permission error such as 403, report that a maintainer must add the label or rerun the gate.
-- `gh run view --job --log` cannot fetch logs for a job that is still running; a `BlobNotFound` log response during `in_progress` is not a failure. For a *completed* job where `gh run view --log`/`--log-failed` returns empty output, fetch `gh api repos/{owner}/{repo}/actions/jobs/{job_id}/logs` directly before concluding logs are unavailable. An empty log is also not evidence about the log's *content*: grepping it for a warning and matching nothing is indistinguishable from that warning being absent, so a silent retrieval failure becomes a false "the regression is gone" or "the base never had it" — the more dangerous reading, because it confirms what you hoped. Whenever a log is the evidence for an absence claim, confirm it is non-empty first (pipe it through `wc -c`) and re-fetch via the job-logs endpoint when it is not.
-- A single red matrix job that fails at dependency install or precompile — a missing transitive package (`ArgumentError: Package X is required but does not seem to be installed`), a resolution error, before any of the project's own tests run — while the other OS/version jobs on the same head pass, is usually an environmental toolchain/registry flake, not a PR defect. This is not limited to prerelease/nightly toolchains; it hits stable releases too, and Windows disproportionately. The strongest disconfirmation is the base branch's own latest CI: if the same job is green on `main` with the identical dependency set, and the PR changes no dependency manifest (`Project.toml`/lockfile), the failure cannot be the PR's code. Re-run the job once and/or cross-check a sibling PR as secondary evidence. Report it as environmental (and whether the check is required for merge) instead of chasing it in the PR, and never weaken tests to satisfy it.
-- A job that passes the project's testsets and fails only in a meta-check's separate precompile subprocess is likewise not an application-test failure. In Julia/Aqua, `done.log was not created, but precompilation exited` from the persistent-tasks check is this signature when the preceding package tests passed. Give it one bounded `gh run rerun <run-id> --failed`, noting that the rerun can also restart jobs cancelled by fail-fast. If the same signature moves to another OS while the original runner passes, apply the base/no-manifest comparison above and classify it as runner/precompile instability; distinguish the actual failure from secondary fail-fast cancellations, retain the technically red CI verdict and merge gate, and do not start an unbounded rerun loop.
-- A docs job that fails with `! [rejected] HEAD -> gh-pages (fetch first)` did not fail to build. Preview deploys from every open PR push to the same `gh-pages` ref, so two runs finishing together race and one is rejected as non-fast-forward; the tell is a successful build and commit line immediately before the rejection, plus a sibling branch's deploy succeeding at the same timestamp. Classify it as an environmental collision rather than a PR defect, re-run the failed job, and note that pushing stacked branches seconds apart is what triggers it — space those pushes instead of firing them back to back.
-- Turning on a strict gate changes what CI *depends on*, not only how loudly it reports. A docs/site builder run with `--strict` (or warnings-as-errors) commonly starts resolving every external link, DOI, and remote badge image, so the gate silently acquires a dependency on dozens of third-party hosts and begins failing on their outages with no content change; when a deploy job declares `needs: <build>`, those flakes block publication too. Before accepting such a gate, count what it now reaches and rebuild the *unchanged* tree several times — differing outcomes across identical runs is the evidence, and one green run is not. Prefer keeping repository-owned defects fatal while demoting third-party reachability to a warning, and replace the lost coverage with a network-free check (resolve relative links against the filesystem) rather than leaving it unguarded. When you demote a rule by configuration, prove the demotion actually takes effect: a suppression entry can be accepted by the parser yet never match — for instance when the tool attributes that diagnostic to a synthetic or hash-named file rather than a project path — leaving a still-fatal error beside config that reads as handling it. Ship no downgrade you have not seen change an outcome.
-- For GitHub Actions workflow changes, prefer `actionlint` when available for syntax and semantics. A generic YAML parser is useful only as a parse smoke test: YAML 1.1 loaders such as PyYAML may read the unquoted Actions key `on` as boolean `True`, so do not use `data["on"]`-style inspection as evidence of workflow semantics.
-- Resolve the PR's live `baseRefName` before any branch-specific protection, rules, or required-status query; do not guess `main` or `master`. Use that exact branch in `branches/<base>/protection` and related endpoints (URL-encode it when it contains `/`). A response for the wrong branch says nothing about the PR's gates.
-- When configuring bot auto-merge, do not treat `gh pr merge --auto` as a CI watcher: it can merge immediately when no enforced requirement blocks it. Verify the intended CI jobs are required on the live base branch and genuinely execute before enabling the automation; an enabled repository setting or green optional job is insufficient. Enforce the user's update scope from verified bot metadata, and make the workflow refuse auto-merge when its expected required contexts are absent. Keep privileged `pull_request_target` jobs limited to metadata/API operations; never check out or execute PR code there.
-- A stacked PR is judged against the branch it *currently* targets, so its gates change when the parent lands. While it targets an unprotected feature branch it can report `mergeStateStatus: CLEAN` with unresolved review threads, no approval requirement, and no required contexts — and then acquire conversation-resolution, approval, and status-check gates the moment the parent merges and GitHub retargets it to the protected default. Read protection for the live `baseRefName` rather than the default branch, and do not call a stacked PR merge-ready on gates measured against a temporary base: say which gates apply now and which appear after the retarget, then re-read state once it happens. That retarget is conditional, not automatic: GitHub moves an open PR's base only when the parent's head branch is *deleted*, and retaining the branch is both the GitHub default and what the merge workflow prescribes. A stacked PR whose parent merged with its branch kept therefore keeps targeting a fully-merged, orphaned branch and still reports `CLEAN` — the identical reading it gave before the merge, so no field marks the staleness and no gate appears. Merging it there lands the work on the dead branch rather than the default, and the PR reports itself merged. Re-read `baseRefName` after the parent lands and retarget before treating the sibling as mergeable. The base also decides whether CI runs at all: a workflow scoped `on: pull_request: branches: [main, develop]` emits nothing for a PR aimed at a feature branch, so `gh pr checks` prints `no checks reported` and `check-suites` stays at zero — indistinguishable from the never-triggered case above until you read the workflow's own branch filter at the head. Check that filter before recommending or accepting a base change; a review that prescribes a retarget must say CI coverage disappears until the parent lands, since a green run recorded against the old base is not evidence for the new one.
-- A private repository may return 403 with explicit plan-feature text such as "Upgrade to GitHub Pro or make this repository public to enable this feature" when the branch-protection API is unavailable. Treat only that specific capability-unavailable response as plan limitation, corroborate it with repository policy when available, and report that protection gates cannot be verified or enforced through the current plan. A generic 403 remains an authentication or permission ambiguity and does not prove that the branch is unprotected.
-- `mergeStateStatus: BLOCKED` with an empty `reviewDecision` and green checks is not by itself an approval gate: when branch protection enables `required_conversation_resolution`, any unresolved review thread — including a thread created by a review posted moments earlier — blocks the merge. Read the branch protection object and the threads' `isResolved` state before reporting a review-requirement gate, and name thread resolution as the concrete unblock; inline replies alone do not resolve a thread.
-- An approving review that does not lift `REVIEW_REQUIRED` is often a code-owner gate: when branch protection sets `required_pull_request_reviews.require_code_owner_reviews`, only an approval from a user or team that `CODEOWNERS` maps to the PR's changed paths satisfies the gate. Before naming who can unblock a stuck PR, read that flag, find the `CODEOWNERS` file (repo root, `.github/`, or `docs/`), match the changed paths against its patterns (last matching entry wins), and name the eligible owners — a generic "another maintainer approval is needed" misdirects when the existing approver simply is not an owner of those paths.
-- Before surfacing a missing-approval or status-check gate, read the general branch object with `gh api repos/{owner}/{repo}/branches/<branch> --jq '{protected,protection}'`, the detailed `.../branches/<branch>/protection` object, and the applicable rules with `gh api repos/{owner}/{repo}/rules/branches/<branch>`. The detailed protection endpoint requires Administration read access, so its bare `404 Not Found` can conceal settings and does not prove that the branch is unprotected; likewise, a child-endpoint 404 does not override a general branch object whose `protected` field is `true`. Treat the branch as unprotected only when the general object reports `protected: false` and no applicable rules say otherwise. If it reports `protected: true` but the detailed settings are unavailable or incomplete, report only the narrower verified fact that the branch is protected, and use live `reviewDecision`, `mergeStateStatus`, review-thread, and check state without inventing an approval count or status context. State an exact approving-review count or required context only when a successful detailed-protection or applicable-rules response exposes it.
-- Read those gate sources *before* writing any body that mentions approval, not after. A conditional hedge — "another maintainer's APPROVE would be needed **if** branch protection requires one" — is not a safe substitute: it reads to a human as a real gate and still requires evidence. In the author-COMMENT case, where explaining why the review is not an APPROVE invites speculation, state only the settled live fact (for example, "`<base>` is unprotected, so no approving review is enforced", "protection requires N approving reviews", or "`<base>` is protected and GitHub reports `REVIEW_REQUIRED`, but this account cannot inspect the exact approval settings"). Getting this wrong in a posted review or comment costs a public correction later, since neither is quietly editable.
+## Complete a published PR
+
+For implementation, review-fix, and skills-submission workflows, verified
+current-head CI is part of delivery when CI is configured. Keep observing ordinary
+queued/running checks with progress updates. Bounds on individual watch calls do
+not end this work; a draft PR or passing local tests does not remove the CI gate.
+Diagnose failures and complete authorized fixes within the owning workflow's
+cumulative attempt limit. Keep draft, review, and merge decisions within their
+existing authorization and policy.
+
+Honor explicitly limited local-only, publish-only, or status-only requests. A user
+stop, an explicit overall time/resource limit, a demonstrated external blocker,
+or an exhausted fix budget can require an incomplete handoff: report the exact
+head, unfinished checks, evidence for the stopping reason, and remaining action.
+Ordinary CI runtime or one watch timeout is not such a blocker. Read-only CI
+status requests may report the current state without waiting for completion.
+
+## Observe the actual head
+
+1. Resolve current `headRefOid`. After a push, if the rich PR view still shows the
+   old head, check the remote branch ref and narrow REST PR head before watching.
+2. Read current-head checks and applicable workflow triggers. Empty checks just
+   after a push can mean they have not registered; continue polling under the
+   completion gate above. A watch exit code is never the verdict.
+3. After every watch, separately read structured state and conclusion for the
+   verified head. Distinguish passed, failed, pending, skipped, gated, and not
+   triggered. Do not substitute local tests or a manual dispatch for an absent
+   required PR event/context.
+
+`statusCheckRollup` contains both `CheckRun` (`status`, `conclusion`) and
+`StatusContext` (`state`). A completed CheckRun or terminal context state is
+finished; do not treat a context's null `status` as pending forever. The legacy
+combined `/commits/<sha>/status` endpoint omits Actions CheckRuns. Use rollup or
+`/commits/<sha>/check-runs`; run IDs in check URLs can help when run-list data lags.
+
+For cross-repository PRs, inspect source-fork runs for the exact PR head before
+declaring hosted CI absent or proposing workflow-policy changes. An empty upstream
+rollup does not establish absence. Apply the event, attempt, log, and actual-test
+execution checks below to qualifying source-fork runs, including push runs. Report
+that evidence separately from checks attached to the upstream PR, and assess it
+against live merge requirements: it cannot replace an enforced upstream context
+or required PR event. Discovering usable CI evidence does not authorize settings
+changes.
+
+Use bounded watches/polls within the client's per-command duration. Inspect
+current state after a harness timeout; it does not prove the run is stuck. Switch
+from noisy watch output to compact run/job polling when useful. Keep queued jobs
+with no runner, external statuses, and zero-run integration suites distinct.
+An inert suite is not code CI: establish whether a code producer or required
+context should exist before classifying absence. Missing steps in an in-progress
+job are not evidence those steps were omitted.
+
+When several agents need the same CI result, designate one watcher for the
+repository/head and relevant run set; the coordinator may assign that read-only
+role to a helper. Share observations with head, run/attempt, and observation time
+instead of starting duplicate polls. A changed head or rerun needs updated
+evidence. The publisher still refreshes live gates immediately before acting.
+Use [rate-limit recovery](github-troubleshooting.md#rate-limits) when throttled;
+do not multiply retries across workers.
+
+## Events and actual execution
+
+- After draft → ready, inspect whether `ready_for_review` is a configured trigger.
+  If it is, require the new run set even on the same SHA; group duplicate names by
+  run ID/time. If it is not, do not wait for a nonexistent transition run, but
+  disclose any heavy tests the draft condition skipped.
+- A green lane with `continue-on-error`, draft gates, or conditional steps may not
+  have tested the change. Verify relevant tests executed before citing that lane
+  as coverage. Checks restricted to schedules/manual dispatch do not guard PRs.
+- A downstream status can fail because its producer was label-gated or skipped.
+  Establish that producer condition before proposing code changes; apply labels
+  or rerun gates only within the authorized workflow and report permission limits.
+- A green `workflow_dispatch` does not validate a job gated on `push` or another
+  ref/event. After fixing an external prerequisite, rerun the qualifying event
+  when authorized. Use a full rerun when an upstream artifact is required.
+- After reruns, read `run_attempt`, latest job IDs (`jobs?filter=latest`), and logs
+  for that attempt. Do not mix prior failures with carried-forward successful jobs.
+- Changes to `GITHUB_TOKEN` merge automation must account for suppressed downstream
+  push workflows. Verify the authorized deployment path on the actual merge SHA.
+  Keep privileged `pull_request_target` listeners on trusted metadata/base code;
+  do not execute contributor code with privileged credentials.
+- Job permissions apply to every step and matrix entry. When only an upload needs
+  extra credentials or `id-token: write`, prefer a small job that consumes the
+  verified report artifact without running contributor scripts. Repository read
+  access does not prevent an identity token from authorizing external writes;
+  assess that service's trust conditions and fork/Dependabot behavior separately.
+
+## Failure attribution
+
+Read failed-job metadata, annotations, and nonempty logs before editing code.
+Missing runners, failed dependency installation, precompile instability, or a
+`gh-pages` non-fast-forward deploy collision may be environmental. Compare an
+appropriate base run, tool/dependency versions, and execution phase; matching
+manifests alone do not prove the PR cannot cause an install failure. One authorized
+bounded rerun can test a suspected transient failure. Preserve a still-red required
+check as a merge gate even when its likely cause is infrastructure.
+
+For warning-only docs builds changed by the PR, compare relevant warnings with
+base evidence when needed to establish a regression. Read final build logs rather
+than intermediate-pass output. For a new strict gate, separate repository-owned
+errors from third-party reachability; demonstrate any authorized suppression and
+retain meaningful local validation. Never weaken CI solely to turn it green.
+Validate workflow edits with `actionlint` when available; a YAML 1.1 parser can
+interpret `on` as a Boolean and does not validate Actions semantics.
+
+## Live merge requirements
+
+Resolve the live `baseRefName`; URL-encode branch names in REST paths. Consult the
+branch object, detailed protection when accessible, and applicable branch rules:
+
+- `branches/<base>` exposes `protected` and summary protection.
+- `branches/<base>/protection` may require Administration read access.
+- `rules/branches/<base>` exposes applicable rules.
+
+Moving a step out of a required lane can remove its enforced merge gate even if
+the new job still fails strictly. Compare the old/new check graph with native
+required contexts and custom merge automation. An automation rule requiring all
+reported checks does not make a new context required for human merges. Preserve
+the gate through settings changes only when authorized; otherwise prepare the
+exact required-check change and report that remaining action.
+
+A detailed endpoint's 404 does not override `protected: true`. Report an exact
+approval count/context only from a successful settings/rules response. A specific
+plan-feature error can establish a plan limitation; generic 403 remains ambiguous.
+Use live `reviewDecision`, merge state, threads, and checks without inventing gates.
+`BLOCKED` can reflect unresolved conversations, not approval count; replies do not
+resolve threads. For required code-owner review, inspect CODEOWNERS at the proper
+ref and use its last matching rule to identify eligible owners.
+
+When a review exception is requested, distinguish PR authorship from the actor
+performing the merge. GitHub's classic `bypass_pull_request_allowances` applies to
+the actor across PRs and can also bypass required PR creation. An author-only
+request does not by itself authorize that broader allowance; explain the scope
+and obtain authorization for it or use a mechanism matching the requested scope.
+Preserve existing bypass entries and unrelated protections. Read back both the
+exception and the required CI checks after an authorized settings change.
+
+An aggregate `REVIEW_REQUIRED` or `BLOCKED` can remain after an actor-specific
+review exception is configured. Establish its applicability from the live policy
+and authenticated actor, not the aggregate label alone. The exception does not
+waive CI or unresolved blocking feedback. For a client-only merge refusal after
+these gates pass, follow [CLI troubleshooting](github-troubleshooting.md);
+do not turn a review exception into a blanket admin bypass.
+
+Stacked PR gates and CI branch filters depend on the current base. After a parent
+merges, re-read siblings' bases: keeping the parent branch can leave them targeting
+that branch. Retarget only within authorized scope and re-evaluate gates and event
+coverage. `gh pr merge --auto` can merge immediately when nothing is enforced;
+verify expected required contexts before enabling it.
+
+For Pages runtime/build-source mismatches and published-content evidence, use
+[gh-pages-deployment](../../gh-pages-deployment/SKILL.md); a successful custom
+build does not validate a separate legacy Pages publisher.

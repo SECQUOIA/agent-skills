@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "selected_skill",
+    "actions",
+    "rationale"
+  ],
+  "properties": {
+    "selected_skill": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true,
+      "description": "Ordered proposed steps in the respondent's own words; no grader action IDs are supplied."
+    },
+    "rationale": {
+      "type": "string"
+    }
+  }
+}

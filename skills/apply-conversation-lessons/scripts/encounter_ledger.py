@@ -2,8 +2,10 @@
 """Shared encounter ledger and lifecycle-hook adapter for SECQUOIA skills.
 
 Encounter history stores rule identifiers, workflow labels, agent names, outcomes,
-and skill revisions. Transient hook state uses hashed lifecycle identifiers. The
-runner never reads or persists prompts or transcripts.
+skill revisions, and optional runtime labels. Runtime labels describe each observed
+event, not which model caused a whole deduplicated episode. Transient hook state
+uses hashed lifecycle identifiers. The runner never reads or persists prompts or
+transcripts.
 """
 
 from __future__ import annotations
@@ -25,7 +27,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-
 INSTALLATION_ID = "secquoia-encounter-ledger"
 DEFAULT_DEDUPE_HOURS = 24
 DEFAULT_REPORT_DAYS = 30
@@ -33,6 +34,7 @@ DEFAULT_MIN_ENCOUNTERS = 3
 HOOK_STATE_RETENTION_DAYS = 30
 MAX_NESTED_SHELL_DEPTH = 32
 MAX_TOOL_RESPONSE_SCAN_CHARS = 32_000
+RUNTIME_FIELDS = ("model", "reasoning_effort", "client_version", "harness_version")
 OUTCOME_RANK = {"passed": 0, "prevented": 1, "escaped": 2}
 
 RULES = {
@@ -373,8 +375,7 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA busy_timeout=2000")
-    connection.executescript(
-        """
+    connection.executescript("""
         CREATE TABLE IF NOT EXISTS encounters (
             id INTEGER PRIMARY KEY,
             rule_id TEXT NOT NULL,
@@ -389,10 +390,30 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
             last_skill_revision TEXT NOT NULL,
             outcome TEXT NOT NULL CHECK (outcome IN ('passed', 'prevented', 'escaped')),
             attempts INTEGER NOT NULL DEFAULT 1,
-            detail TEXT NOT NULL DEFAULT ''
+            detail TEXT NOT NULL DEFAULT '',
+            target_resolution TEXT NOT NULL DEFAULT 'legacy'
         );
         CREATE INDEX IF NOT EXISTS encounters_lookup
             ON encounters(rule_id, workflow_key, last_seen);
+
+        -- Existing encounters remain intact. Their historical attempts cannot
+        -- be reconstructed as model-specific observations and are not backfilled.
+        CREATE TABLE IF NOT EXISTS encounter_observations (
+            id INTEGER PRIMARY KEY,
+            encounter_id INTEGER NOT NULL REFERENCES encounters(id),
+            observed_at TEXT NOT NULL,
+            agent TEXT NOT NULL,
+            model TEXT,
+            reasoning_effort TEXT,
+            client_version TEXT,
+            harness_version TEXT,
+            event TEXT NOT NULL,
+            skill_revision TEXT NOT NULL,
+            outcome TEXT NOT NULL CHECK (outcome IN ('passed', 'prevented', 'escaped')),
+            target_resolution TEXT NOT NULL DEFAULT 'legacy'
+        );
+        CREATE INDEX IF NOT EXISTS observations_encounter
+            ON encounter_observations(encounter_id);
 
         CREATE TABLE IF NOT EXISTS hook_activity (
             session_id TEXT NOT NULL,
@@ -433,9 +454,35 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
             updated_at TEXT NOT NULL,
             PRIMARY KEY (session_id, tool_use_id)
         );
-        """
-    )
+
+        -- Attempts are observations, not evidence about publication authority.
+        -- Keep them outside encounter opportunities/violations and lesson counts.
+        CREATE TABLE IF NOT EXISTS remote_write_observations (
+            id INTEGER PRIMARY KEY,
+            observed_at TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            agent_scope TEXT NOT NULL,
+            tool_use_id TEXT,
+            agent TEXT NOT NULL,
+            reported_role TEXT NOT NULL,
+            role_source TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            skill_revision TEXT NOT NULL,
+            runtime_json TEXT NOT NULL,
+            UNIQUE (session_id, agent_scope, tool_use_id, operation)
+        );
+        CREATE INDEX IF NOT EXISTS remote_write_observations_time
+            ON remote_write_observations(observed_at);
+        """)
     with _write_transaction(connection):
+        for table in ("encounters", "encounter_observations"):
+            columns = {
+                row["name"] for row in connection.execute(f"PRAGMA table_info({table})")
+            }
+            if "target_resolution" not in columns:
+                connection.execute(
+                    f"ALTER TABLE {table} ADD COLUMN target_resolution TEXT NOT NULL DEFAULT 'legacy'"
+                )
         activity_columns = {
             str(row["name"])
             for row in connection.execute("PRAGMA table_info(hook_activity)").fetchall()
@@ -462,6 +509,10 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
             connection.execute(
                 f"DELETE FROM {table} WHERE updated_at < ?", (stale_cutoff,)
             )
+        connection.execute(
+            "DELETE FROM remote_write_observations WHERE observed_at < ?",
+            (stale_cutoff,),
+        )
     return connection
 
 
@@ -579,6 +630,96 @@ def _workflow_hash(label: str) -> str:
     return hashlib.sha256(label.encode("utf-8")).hexdigest()[:24]
 
 
+def _runtime_label(value: Any) -> str | None:
+    """Accept bounded identifier labels, never arbitrary payload text or objects."""
+    if not isinstance(value, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}", value
+    ):
+        return None
+    if value.lower() in {"unknown", "unspecified", "null"} or value.lower().startswith(
+        ("sk-", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_")
+    ):
+        return None
+    return value
+
+
+def _payload_runtime(payload: dict[str, Any]) -> dict[str, str | None]:
+    """Read only explicit top-level labels; do not infer from config or transcript."""
+    values = {field: _runtime_label(payload.get(field)) for field in RUNTIME_FIELDS}
+    # Some hook clients expose the model under model_slug. Never traverse nested
+    # metadata or tool responses, which may contain prompt text and credentials.
+    if values["model"] is None:
+        values["model"] = _runtime_label(payload.get("model_slug"))
+    event = payload.get("hook_event_name")
+    values["event"] = (
+        event
+        if isinstance(event, str)
+        and event
+        in {
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "Stop",
+            "SubagentStop",
+            "StopFailure",
+            "SessionEnd",
+        }
+        else "unknown"
+    )
+    return values
+
+
+def _target_resolution(workflow_id: str, workflow_label: str) -> str:
+    """Separate classifier coverage gaps from tracked missing-read checks."""
+    components = workflow_id.split(":", 3) if workflow_id.startswith("github:") else []
+    host, repo, target = components[1:] if len(components) == 4 else ("", "", "")
+    known_node = target.startswith("graphql-node:") or workflow_label.endswith(
+        ":graphql-node"
+    )
+    unresolved = (
+        target.startswith(("graphql:", "dynamic:"))
+        or host == "unknown-host"
+        or any(marker in host for marker in ("$", "`"))
+        or repo == "unknown-dynamic-repo"
+        or (not known_node and repo == "unknown-repo")
+        or workflow_label.endswith(
+            (":graphql", ":dynamic API target", ":dynamic target")
+        )
+        or workflow_label == "dynamic GitHub repository target"
+        or (
+            not known_node
+            and workflow_label.startswith(
+                ("unknown-repo:", "unknown-repo#", "unknown-dynamic-repo:")
+            )
+        )
+    )
+    return "unresolved_target" if unresolved else "tracked_target"
+
+
+def _report_resolution_sql(
+    connection: sqlite3.Connection, alias: str = "e"
+) -> tuple[str, str]:
+    # Reporting must also work against a read-only database created by an older
+    # runner. Only unmistakable legacy labels identify unsupported target shapes;
+    # these are labelled inference, never backfilled as new observations.
+    connection.create_function(
+        "legacy_target_resolution", 1, lambda label: _target_resolution("", label)
+    )
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(encounters)")
+    }
+    inferred = f"legacy_target_resolution({alias}.workflow_label)"
+    if "target_resolution" not in columns:
+        return inferred, "1"
+    return (
+        f"CASE WHEN {alias}.target_resolution IN ('tracked_target', 'unresolved_target') "
+        f"THEN {alias}.target_resolution ELSE {inferred} END",
+        f"({alias}.target_resolution = 'legacy')",
+    )
+
+
 def record_encounter(
     connection: sqlite3.Connection,
     *,
@@ -589,6 +730,11 @@ def record_encounter(
     outcome: str,
     revision: str,
     detail: str = "",
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+    client_version: str | None = None,
+    harness_version: str | None = None,
+    event: str | None = "manual",
     now: datetime | None = None,
     dedupe_hours: int = DEFAULT_DEDUPE_HOURS,
 ) -> int:
@@ -600,6 +746,13 @@ def record_encounter(
     current_text = isoformat(current)
     cutoff = isoformat(current - timedelta(hours=dedupe_hours))
     workflow_key = _workflow_hash(workflow_id)
+    target_resolution = _target_resolution(workflow_id, workflow_label)
+    if target_resolution == "unresolved_target":
+        detail = (
+            "Exact target resolution is unsupported or uncertain. This outcome "
+            "records a hook action or unresolved boundary, not a demonstrated "
+            "missing-read violation."
+        )
     with _write_transaction(connection):
         row = connection.execute(
             """
@@ -615,8 +768,8 @@ def record_encounter(
                 INSERT INTO encounters (
                     rule_id, workflow_key, workflow_label, first_seen, last_seen,
                     first_agent, last_agent, agents_json, first_skill_revision,
-                    last_skill_revision, outcome, attempts, detail
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                    last_skill_revision, outcome, attempts, detail, target_resolution
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
                 (
                     rule_id,
@@ -631,33 +784,162 @@ def record_encounter(
                     revision,
                     outcome,
                     detail,
+                    target_resolution,
                 ),
             )
-            return int(cursor.lastrowid)
-
-        agents = set(json.loads(row["agents_json"]))
-        agents.add(agent)
-        strongest = max((row["outcome"], outcome), key=OUTCOME_RANK.__getitem__)
+            identifier = int(cursor.lastrowid)
+        else:
+            identifier = int(row["id"])
+            agents = set(json.loads(row["agents_json"]))
+            agents.add(agent)
+            strongest = max((row["outcome"], outcome), key=OUTCOME_RANK.__getitem__)
+            connection.execute(
+                """
+                UPDATE encounters
+                SET last_seen = ?, last_agent = ?, agents_json = ?,
+                    last_skill_revision = ?, outcome = ?, attempts = attempts + 1,
+                    detail = CASE WHEN ? = '' THEN detail ELSE ? END
+                WHERE id = ?
+                """,
+                (
+                    current_text,
+                    agent,
+                    json.dumps(sorted(agents)),
+                    revision,
+                    strongest,
+                    detail,
+                    detail,
+                    row["id"],
+                ),
+            )
         connection.execute(
             """
-            UPDATE encounters
-            SET last_seen = ?, last_agent = ?, agents_json = ?,
-                last_skill_revision = ?, outcome = ?, attempts = attempts + 1,
-                detail = CASE WHEN ? = '' THEN detail ELSE ? END
-            WHERE id = ?
+            INSERT INTO encounter_observations (
+                encounter_id, observed_at, agent, model, reasoning_effort,
+                client_version, harness_version, event, skill_revision, outcome, target_resolution
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                identifier,
                 current_text,
                 agent,
-                json.dumps(sorted(agents)),
+                _runtime_label(model),
+                _runtime_label(reasoning_effort),
+                _runtime_label(client_version),
+                _runtime_label(harness_version),
+                _runtime_label(event) or "unknown",
                 revision,
-                strongest,
-                detail,
-                detail,
-                row["id"],
+                outcome,
+                target_resolution,
             ),
         )
-        return int(row["id"])
+        return identifier
+
+
+def _runtime_report(
+    connection: sqlite3.Connection, rule_id: str, cutoff: str
+) -> dict[str, Any]:
+    """Report event cohorts, preserving uncertainty for legacy/mixed-version rows."""
+    attempts = connection.execute(
+        "SELECT COALESCE(SUM(attempts), 0) FROM encounters WHERE rule_id = ? AND last_seen >= ?",
+        (rule_id, cutoff),
+    ).fetchone()[0]
+    exists = connection.execute(
+        "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'encounter_observations'"
+    ).fetchone()
+    cohorts = []
+    assessment, _ = _report_resolution_sql(connection)
+    if exists:
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(encounter_observations)")
+        }
+        if "target_resolution" in columns:
+            assessment = (
+                "CASE WHEN o.target_resolution IN ('tracked_target', 'unresolved_target') "
+                f"THEN o.target_resolution ELSE {assessment} END"
+            )
+        cohorts = [
+            dict(row)
+            for row in connection.execute(
+                f"""
+            SELECT o.agent, o.model, o.reasoning_effort, o.client_version,
+                   o.harness_version, o.event, o.skill_revision,
+                   COUNT(*) AS observations, COUNT(DISTINCT e.id) AS episodes_touched,
+                   SUM(o.outcome = 'passed' AND ({assessment}) = 'tracked_target') AS passed,
+                   SUM(o.outcome = 'prevented' AND ({assessment}) = 'tracked_target') AS prevented,
+                   SUM(o.outcome = 'escaped' AND ({assessment}) = 'tracked_target') AS escaped,
+                   SUM(({assessment}) = 'unresolved_target') AS unresolved_target
+            FROM encounter_observations o JOIN encounters e ON e.id = o.encounter_id
+            WHERE e.rule_id = ? AND e.last_seen >= ?
+            GROUP BY o.agent, o.model, o.reasoning_effort, o.client_version,
+                     o.harness_version, o.event, o.skill_revision
+            ORDER BY o.agent, o.model, o.reasoning_effort, o.client_version,
+                     o.harness_version, o.event, o.skill_revision
+            """,
+                (rule_id, cutoff),
+            ).fetchall()
+        ]
+    recorded = sum(row["observations"] for row in cohorts)
+    return {
+        "runtime_observations": cohorts,
+        "recorded_observations": recorded,
+        "unattributed_legacy_observations": max(0, attempts - recorded),
+        "attribution_note": (
+            "Runtime labels describe observed events, not causal model attribution. "
+            "Cohorts can share episodes; counts include all observations of episodes "
+            "active in the report window. Historical attempts without observation "
+            "rows have unknown runtime and per-attempt outcome. Unresolved target "
+            "observations are classifier coverage gaps and excluded from passed, "
+            "prevented, and escaped behavior counts."
+        ),
+    }
+
+
+def report_remote_write_observations(
+    connection: sqlite3.Connection | None,
+    *,
+    since_days: int = DEFAULT_REPORT_DAYS,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Report audit attempts separately, including read-only legacy databases."""
+    observations = []
+    if connection is not None and connection.execute(
+        "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'remote_write_observations'"
+    ).fetchone():
+        cutoff = isoformat((now or utc_now()) - timedelta(days=since_days))
+        for row in connection.execute(
+            """
+            SELECT agent, reported_role, role_source, operation, skill_revision,
+                runtime_json, COUNT(*) AS attempts,
+                MIN(observed_at) AS first_seen, MAX(observed_at) AS last_seen
+            FROM remote_write_observations WHERE observed_at >= ?
+            GROUP BY agent, reported_role, role_source, operation, skill_revision, runtime_json
+            ORDER BY agent, reported_role, operation, skill_revision, runtime_json
+            """,
+            (cutoff,),
+        ).fetchall():
+            observation = dict(row)
+            observation["runtime"] = json.loads(observation.pop("runtime_json"))
+            observations.append(observation)
+    return {
+        "authorization_assessed": False,
+        "coverage_note": (
+            "Audit only: recognized PreToolUse attempts, not completed writes or "
+            "authorization violations. Worker publication may be explicitly authorized. "
+            "Claude agent_id is reported worker metadata, not verified authority; "
+            "other clients and missing metadata have unknown role. Literal git pushes "
+            "and existing gh classifier coverage only; scripts, aliases, dynamic git "
+            "arguments, heredoc body expansions, unobserved tool channels and "
+            "unsupported forms are not covered. Audit preprocessing excludes comments "
+            "and simple heredoc data; unsupported heredoc syntax skips recognition. "
+            "No observations does not establish absence of writes. Attempts with a tool "
+            "ID deduplicate per session/agent/operation; missing IDs cannot deduplicate. "
+            f"Observations retained for {HOOK_STATE_RETENTION_DAYS} days; they never "
+            "contribute to lesson eligibility or change hook decisions."
+        ),
+        "observations": observations,
+    }
 
 
 def report_encounters(
@@ -680,22 +962,29 @@ def report_encounters(
             agents_by_rule.setdefault(agent_row["rule_id"], set()).update(
                 str(agent) for agent in agents if agent
             )
+    assessment, legacy = _report_resolution_sql(connection)
     rows = connection.execute(
-        """
+        f"""
+        WITH assessed AS (
+            SELECT e.*, ({assessment}) AS assessment, ({legacy}) AS legacy_assessment
+            FROM encounters e WHERE last_seen >= ?
+        )
         SELECT
             rule_id,
-            COUNT(*) AS opportunities,
-            SUM(CASE WHEN outcome != 'passed' THEN 1 ELSE 0 END) AS violations,
-            SUM(CASE WHEN outcome = 'prevented' THEN 1 ELSE 0 END) AS prevented,
-            SUM(CASE WHEN outcome = 'escaped' THEN 1 ELSE 0 END) AS escaped,
-            COUNT(DISTINCT workflow_key) AS distinct_targets,
+            COUNT(*) AS total_episodes,
+            SUM(assessment = 'tracked_target') AS opportunities,
+            SUM(assessment = 'tracked_target' AND outcome != 'passed') AS violations,
+            SUM(assessment = 'tracked_target' AND outcome = 'prevented') AS prevented,
+            SUM(assessment = 'tracked_target' AND outcome = 'escaped') AS escaped,
+            SUM(assessment = 'unresolved_target') AS unresolved_target_episodes,
+            SUM(legacy_assessment) AS legacy_inferred_target_episodes,
+            COUNT(DISTINCT CASE WHEN assessment = 'tracked_target' THEN workflow_key END) AS distinct_targets,
             GROUP_CONCAT(DISTINCT last_skill_revision) AS revisions,
             MIN(first_seen) AS first_seen,
             MAX(last_seen) AS last_seen
-        FROM encounters
-        WHERE last_seen >= ?
+        FROM assessed
         GROUP BY rule_id
-        HAVING violations >= ?
+        HAVING violations >= ? OR unresolved_target_episodes > 0
         ORDER BY violations DESC, rule_id
         """,
         (cutoff, min_encounters),
@@ -710,6 +999,19 @@ def report_encounters(
                 "severity": rule["severity"],
                 "description": rule["description"],
                 "opportunities": row["opportunities"],
+                "total_episodes": row["total_episodes"],
+                "unresolved_target_episodes": row["unresolved_target_episodes"],
+                "legacy_inferred_target_episodes": row[
+                    "legacy_inferred_target_episodes"
+                ],
+                "eligible_for_lessons": row["violations"] >= min_encounters,
+                "target_resolution_note": (
+                    "Unresolved targets are coverage diagnostics, excluded from "
+                    "violation/opportunity counts and the lessons threshold. "
+                    "Conservative enforcement may still deny unsupported shapes. "
+                    "Legacy target assessments are inferred from labels; other "
+                    "historical checks have not been revalidated."
+                ),
                 "violations": row["violations"],
                 "prevented": row["prevented"],
                 "escaped": row["escaped"],
@@ -718,6 +1020,7 @@ def report_encounters(
                 "revisions": sorted(filter(None, (row["revisions"] or "").split(","))),
                 "first_seen": row["first_seen"],
                 "last_seen": row["last_seen"],
+                **_runtime_report(connection, row["rule_id"], cutoff),
             }
         )
     return result
@@ -1646,6 +1949,11 @@ class _ShellWord:
     unquoted: bool
     command_boundary: bool = False
     assignment: bool = False
+    literal: bool = False
+
+
+class _LiteralShellToken(str):
+    """A shell word whose value contains no executable interpolation."""
 
 
 def _tokenize_shell_words(command: str) -> list[_ShellWord]:
@@ -1657,6 +1965,7 @@ def _tokenize_shell_words(command: str) -> list[_ShellWord]:
     entirely_unquoted = True
     quoted_before_equals = False
     saw_equals = False
+    literal = True
     quote = ""
     case_modes: list[str] = []
     at_command_start = True
@@ -1698,7 +2007,7 @@ def _tokenize_shell_words(command: str) -> list[_ShellWord]:
         at_command_start = False
 
     def flush() -> None:
-        nonlocal active, entirely_unquoted, quoted_before_equals, saw_equals
+        nonlocal active, entirely_unquoted, quoted_before_equals, saw_equals, literal
         if active:
             text = "".join(value)
             equals = text.find("=")
@@ -1708,7 +2017,12 @@ def _tokenize_shell_words(command: str) -> list[_ShellWord]:
                 and not quoted_before_equals
                 and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", text[:equals]) is not None
             )
-            word = _ShellWord(text, entirely_unquoted, assignment=assignment)
+            word = _ShellWord(
+                text,
+                entirely_unquoted,
+                assignment=assignment,
+                literal=literal and not quote,
+            )
             words.append(word)
             observe_word(word)
         value.clear()
@@ -1717,6 +2031,7 @@ def _tokenize_shell_words(command: str) -> list[_ShellWord]:
         entirely_unquoted = True
         quoted_before_equals = False
         saw_equals = False
+        literal = True
 
     def append_character(char: str, *, unquoted: bool) -> None:
         nonlocal active, entirely_unquoted, quoted_before_equals, saw_equals
@@ -1741,6 +2056,8 @@ def _tokenize_shell_words(command: str) -> list[_ShellWord]:
             if quote == '"' and char == "\\" and index + 1 < len(command):
                 index += 1
                 char = command[index]
+            elif quote == '"' and char in "$`":
+                literal = False
             append_character(char, unquoted=False)
             index += 1
             continue
@@ -1797,6 +2114,8 @@ def _tokenize_shell_words(command: str) -> list[_ShellWord]:
             at_command_start = True
             index = end
             continue
+        if char in "$`":
+            literal = False
         append_character(char, unquoted=True)
         index += 1
     flush()
@@ -1947,10 +2266,27 @@ def _segments_containing_gh(
     env_expansion_depth: int = 0,
     read_context_eligible: bool = True,
     initial: _ExecutionContext | None = None,
+    literal_context_known: bool = True,
 ) -> Iterable[tuple[list[str], bool, _ExecutionContext]]:
     initial = initial or _ExecutionContext(environment={})
     current = initial
     tokens = _tokenize_shell(command)
+    shell_words = _tokenize_shell_words(command)
+    # Only transfer provenance when both parsers agree on every word. Synthetic
+    # env -S reconstruction is deliberately excluded: quoting added by shlex.join
+    # cannot prove that the original shell did not interpolate a remainder.
+    aligned = len(shell_words) == len(tokens) and all(
+        word.value == token
+        or (
+            word.literal and word.value == token.replace("\\$", "$").replace("\\`", "`")
+        )
+        for token, word in zip(tokens, shell_words)
+    )
+    if literal_context_known and aligned:
+        tokens = [
+            _LiteralShellToken(word.value) if word.literal else token
+            for token, word in zip(tokens, shell_words, strict=True)
+        ]
     if depth < MAX_NESTED_SHELL_DEPTH:
         for substitution in _command_substitutions(command):
             yield from _segments_containing_gh(
@@ -1960,7 +2296,6 @@ def _segments_containing_gh(
                 read_context_eligible=read_context_eligible,
                 initial=initial,
             )
-        shell_words = _tokenize_shell_words(command)
         shell_tokens = [word.value for word in shell_words]
         for index, word in enumerate(shell_words):
             if Path(word.value).name not in {"bash", "dash", "ksh", "sh", "zsh"}:
@@ -1976,6 +2311,14 @@ def _segments_containing_gh(
                     env_expansion_depth=env_expansion_depth,
                     read_context_eligible=read_context_eligible,
                     initial=shell_context,
+                    literal_context_known=(
+                        literal_context_known
+                        and all(
+                            word.literal
+                            for word in shell_words
+                            if word.value == nested_command
+                        )
+                    ),
                 )
     elif re.search(r"(?:^|[\s;&|(`])(?:[^\s;&|()]*/)?gh(?:\s|$)", command):
         # A pathological wrapper chain should fail closed instead of hiding a
@@ -2023,6 +2366,7 @@ def _segments_containing_gh(
                             read_context_eligible and not has_control_operator
                         ),
                         initial=split_context,
+                        literal_context_known=False,
                     )
                     break
             candidates: list[tuple[int, _ExecutionContext]] = []
@@ -2079,9 +2423,7 @@ def _segments_containing_gh(
                             working_directory=None,
                         )
                     else:
-                        current = replace(
-                            current, working_directory=cd_directory
-                        )
+                        current = replace(current, working_directory=cd_directory)
             segment = []
         else:
             segment.append(token)
@@ -2105,17 +2447,32 @@ def _flag_values(tokens: list[str], *names: str) -> Iterable[str]:
             if token == name and index + 1 < len(tokens):
                 yield tokens[index + 1]
             elif token.startswith(f"{name}="):
-                yield token.split("=", 1)[1]
+                value = token.split("=", 1)[1]
+                yield (
+                    _LiteralShellToken(value)
+                    if isinstance(token, _LiteralShellToken)
+                    else value
+                )
             elif len(name) == 2 and token.startswith(name) and token != name:
-                yield token[len(name) :].removeprefix("=")
+                value = token[len(name) :].removeprefix("=")
+                yield (
+                    _LiteralShellToken(value)
+                    if isinstance(token, _LiteralShellToken)
+                    else value
+                )
 
 
-def _read_query_value(value: str, cwd: str | None) -> tuple[str, bool]:
+def _read_query_value(
+    value: str, cwd: str | None, *, literal: bool = False
+) -> tuple[str, bool]:
     if not value.startswith("@"):
         # Interpolated text is kept so classification can still spot a
         # top-level mutation keyword, but it is never "known": it cannot
         # authorize a write or bind an exact target.
-        return value, "$" not in value and "`" not in value
+        static_document = literal and bool(
+            re.match(r"\s*(?:query\b|mutation\b|subscription\b|\{)", value)
+        )
+        return value, static_document or ("$" not in value and "`" not in value)
     if value == "@-":
         return "", False
     path = Path(value[1:])
@@ -2164,7 +2521,11 @@ def _graphql_query_texts(tokens: list[str], cwd: str | None) -> list[tuple[str, 
     for field in _flag_values(tokens, "-f", "-F", "--field", "--raw-field"):
         key, separator, value = field.partition("=")
         if separator and key == "query":
-            queries.append(_read_query_value(value, cwd))
+            queries.append(
+                _read_query_value(
+                    value, cwd, literal=isinstance(field, _LiteralShellToken)
+                )
+            )
     if queries:
         return queries
 
@@ -2184,7 +2545,9 @@ def _graphql_operation_name(
     for field in _flag_values(tokens, "-f", "-F", "--field", "--raw-field"):
         key, separator, value = field.partition("=")
         if separator and key == "operationName":
-            resolved, known = _read_query_value(value, cwd)
+            resolved, known = _read_query_value(
+                value, cwd, literal=isinstance(field, _LiteralShellToken)
+            )
             if not known:
                 return None, False
             values.append(resolved)
@@ -2405,6 +2768,87 @@ def _graphql_bound_target_fields(tokens: list[str], cwd: str | None) -> set[str]
     return bound_fields
 
 
+def _graphql_single_root(lexemes: list[str]) -> bool:
+    """A second root field or root fragment may address an unrecognized target."""
+    depth = parentheses = roots = 0
+    previous = ""
+    for value in lexemes:
+        if value == "(":
+            parentheses += 1
+        elif value == ")":
+            parentheses -= 1
+        elif not parentheses:
+            if value == "{":
+                depth += 1
+            elif value == "}":
+                depth -= 1
+            elif depth == 1:
+                if value == ".":
+                    return False
+                if re.fullmatch(r"[A-Za-z_]\w*", value) and previous not in {":", "@"}:
+                    roots += 1
+        previous = value
+    return roots == 1
+
+
+def _graphql_node_target(tokens: list[str], cwd: str | None) -> str | None:
+    """Resolve one statically bound node; ambiguous or opaque requests stay unknown.
+
+    The lexical scan keeps GraphQL strings atomic, so text inside comment bodies
+    cannot masquerade as an argument. All recognized node references must resolve
+    to the same value; a multi-target request must never inherit the first ID.
+    """
+    queries = _graphql_query_texts(tokens, cwd)
+    if len(queries) != 1 or not queries[0][1]:
+        return None
+    query = queries[0][0]
+    # Block strings have escaped-triple-quote rules that this small lexical
+    # classifier does not implement. Their contents must never supply a target.
+    if '"""' in query:
+        return None
+    operations = _graphql_operations(query)
+    selected, known = _graphql_operation_name(tokens, cwd)
+    if len(operations) != 1 or not known:
+        return None
+    if selected is not None and operations[0][1] != selected:
+        return None
+    fields = _graphql_fields(tokens)
+    lexemes = [
+        value
+        for value in re.findall(
+            r'""".*?"""|"(?:\\.|[^"\\])*"|#[^\n]*|\$[A-Za-z_]\w*|[A-Za-z_]\w*|[^\s,]',
+            query,
+            flags=re.S,
+        )
+        if not value.startswith("#")
+    ]
+    if not _graphql_single_root(lexemes):
+        return None
+    targets = set()
+    for index, key in enumerate(lexemes[:-2]):
+        if key not in {"pullRequestId", "issueId", "subjectId", "repositoryId", "id"}:
+            continue
+        if lexemes[index + 1] != ":":
+            continue
+        value = lexemes[index + 2]
+        if value.startswith("$"):
+            value = fields.get(value[1:], "")
+            if not value or value.startswith("@") or _dynamic_shell_value(value):
+                return None
+        elif value.startswith('"') and not value.startswith('"""'):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                return None
+            if not value:
+                return None
+        else:
+            # A variable declaration such as "$id:ID!" is not a node binding.
+            continue
+        targets.add(value)
+    return next(iter(targets)) if len(targets) == 1 else None
+
+
 def _graphql_target(
     tokens: list[str], cwd: str | None, repo: str
 ) -> tuple[str, str, str]:
@@ -2421,15 +2865,9 @@ def _graphql_target(
     )
     if bound_repo:
         repo = f"{owner}/{name}"
-    for key in ("pullRequestId", "issueId", "subjectId", "repositoryId", "id"):
-        value = fields.get(key)
-        if (
-            key in bound_fields
-            and value
-            and not value.startswith("@")
-            and not any(char in value for char in "$`")
-        ):
-            return repo, f"graphql-node:{_target_digest(value)}", f"{repo}:graphql-node"
+    node = _graphql_node_target(tokens, cwd)
+    if node is not None:
+        return repo, f"graphql-node:{_target_digest(node)}", f"{repo}:graphql-node"
     queries = _graphql_query_texts(tokens, cwd)
     known_queries = [query for query, known in queries if known]
     scope = (
@@ -2528,19 +2966,7 @@ def _has_explicit_repository_scope(tokens: list[str], cwd: str | None) -> bool:
                 and not _dynamic_shell_value(fields["owner"] + fields["name"])
             ):
                 return True
-            return any(
-                key in bound_fields
-                and bool(fields.get(key))
-                and not fields[key].startswith("@")
-                and not _dynamic_shell_value(fields[key])
-                for key in (
-                    "pullRequestId",
-                    "issueId",
-                    "subjectId",
-                    "repositoryId",
-                    "id",
-                )
-            )
+            return _graphql_node_target(tokens, cwd) is not None
         return False
     target = _immediate_target(tokens, group, action)
     if group == "repo" and target and "/" in target:
@@ -2682,10 +3108,14 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
                     and read_eligible
                     and explicit_scope
                     and not dynamic_scope
+                    and _target_resolution(f"{repo_key}:{target}", label)
+                    == "tracked_target"
                     and not _dynamic_shell_value(hostname)
                 ),
                 created_comment_kind=(
-                    _created_comment_kind(tokens, group, action) if kind == "write" else ""
+                    _created_comment_kind(tokens, group, action)
+                    if kind == "write"
+                    else ""
                 ),
             )
         )
@@ -3296,6 +3726,221 @@ def _command_from_payload(payload: dict[str, Any]) -> str:
     return str(tool_input.get("command") or tool_input.get("cmd") or "")
 
 
+def _literal_git_push(arguments: list[_ShellWord]) -> bool:
+    """Recognize common literal pushes, excluding dry runs and help requests."""
+    if any(not word.literal for word in arguments):
+        return False
+    tokens = [word.value for word in arguments]
+    index = 0
+    global_values = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
+    global_flags = {
+        "-p", "-P", "--paginate", "--no-pager", "--bare",
+        "--no-replace-objects", "--no-optional-locks", "--no-lazy-fetch",
+        "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
+        "--icase-pathspecs",
+    }
+    while index < len(tokens) and tokens[index] != "push":
+        token = tokens[index]
+        if token in global_values:
+            index += 2
+        elif token in global_flags or any(
+            token.startswith(flag + "=") for flag in global_values if flag.startswith("--")
+        ) or (token.startswith(("-C", "-c")) and len(token) > 2):
+            index += 1
+        else:
+            return False
+    if index == len(tokens):
+        return False
+    index += 1
+    dry_run = False
+    value_flags = {"--repo", "--receive-pack", "--exec", "--push-option", "--recurse-submodules", "-o"}
+    boolean_flags = {
+        "--all", "--branches", "--prune", "--mirror", "--tags", "--follow-tags",
+        "--force", "--delete", "--set-upstream", "--thin", "--no-thin",
+        "--atomic", "--no-atomic", "--porcelain", "--verbose", "--quiet",
+        "--progress", "--no-verify", "--verify", "--ipv4", "--ipv6",
+        "--force-if-includes", "--no-force-if-includes", "--no-force-with-lease",
+        "--signed", "--no-signed", "--force-with-lease",
+    }
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            break
+        if token in {"--dry-run", "--no-dry-run"}:
+            dry_run = token == "--dry-run"
+        elif token in value_flags:
+            index += 1
+            if index == len(tokens):
+                return False
+        elif token in boolean_flags or any(
+            token.startswith(flag + "=")
+            for flag in value_flags | {"--signed", "--force-with-lease"}
+            if flag.startswith("--")
+        ) or (token.startswith("-o") and len(token) > 2):
+            pass
+        elif token.startswith("-") and not token.startswith("--") and set(token[1:]) <= set("nqvufd46"):
+            dry_run = dry_run or "n" in token[1:]
+        elif token.startswith("-"):
+            return False
+        index += 1
+    return not dry_run
+
+
+def _audit_shell_text(command: str) -> str | None:
+    """Remove comments and simple heredoc data for audit recognition only.
+
+    Delimiters must be plain identifiers or wholly quoted literal words. Skip
+    unsupported/malformed heredocs rather than treating their data as commands.
+    Expansions in unquoted heredoc bodies are deliberately outside audit coverage.
+    """
+    output: list[str] = []
+    heredocs: list[tuple[str, bool]] = []
+    quote = ""
+    word_start = True
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char == "\\" and quote != "'" and index + 1 < len(command):
+            escaped = command[index + 1]
+            if escaped != "\n":
+                output.extend((char, escaped))
+                word_start = False
+            index += 2
+            continue
+        if quote:
+            output.append(char)
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            word_start = False
+        elif char == "#" and word_start:
+            end = command.find("\n", index)
+            index = len(command) if end < 0 else end
+            continue
+        elif command.startswith("<<", index):
+            # Here-strings and composite/dynamic delimiter words are unsupported.
+            match = re.match(
+                r"<<(-?)[ \t]*(?:([A-Za-z_][A-Za-z0-9_]*)|'([^'\n]+)'|\"([^\"\n]+)\")(?=$|[ \t\r\n;&|()])",
+                command[index:],
+            )
+            if match is None:
+                return None
+            delimiter = next(value for value in match.groups()[1:] if value is not None)
+            heredocs.append((delimiter, bool(match.group(1))))
+            output.append(" ")
+            word_start = True
+            index += match.end()
+            continue
+        if char == "\n" and heredocs:
+            output.append("\n")
+            word_start = True
+            index += 1
+            for delimiter, strip_tabs in heredocs:
+                while index < len(command):
+                    end = command.find("\n", index)
+                    end = len(command) if end < 0 else end
+                    line = command[index:end]
+                    index = end + (end < len(command))
+                    if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                        break
+                else:
+                    return None
+            heredocs.clear()
+            continue
+        elif not quote:
+            word_start = char in " \t\r\n;&|()<>"
+        output.append(char)
+        index += 1
+    return None if quote or heredocs else "".join(output)
+
+
+def _audit_remote_write_kinds(command: str, cwd: str, *, depth: int = 0) -> set[str]:
+    """Recognize bounded executable segments without altering gh enforcement."""
+    if depth >= MAX_NESTED_SHELL_DEPTH:
+        return set()
+    command = _audit_shell_text(command)
+    if command is None:
+        return set()
+    operations: set[str] = set()
+    words = _tokenize_shell_words(command)
+    for index, word in enumerate(words):
+        if not word.literal or _executable_shell_position(words, index) is None:
+            continue
+        executable = Path(word.value).name
+        end = next(
+            (offset for offset in range(index + 1, len(words)) if words[offset].command_boundary),
+            len(words),
+        )
+        if executable == "git" and _literal_git_push(words[index + 1 : end]):
+            operations.add("git-push")
+        if executable == "gh":
+            # Reconstruct this executable argv only; never feed heredoc/comment
+            # text or an unprocessed nested shell into the shared classifier.
+            segment = shlex.join(part.value for part in words[index:end])
+            if any(
+                op.kind == "write" and op.summary != "gh repo set-default"
+                for op in classify_gh_operations(segment, cwd)
+            ):
+                operations.add("gh-write")
+        if executable in {"bash", "dash", "ksh", "sh", "zsh"}:
+            nested = _shell_command_argument([part.value for part in words[:end]], index)
+            if nested is not None:
+                operations.update(_audit_remote_write_kinds(nested, cwd, depth=depth + 1))
+    for nested in _command_substitutions(command):
+        operations.update(_audit_remote_write_kinds(nested, cwd, depth=depth + 1))
+    return operations
+
+
+def _has_literal_git_push(command: str, *, depth: int = 0) -> bool:
+    return "git-push" in _audit_remote_write_kinds(command, os.getcwd(), depth=depth)
+
+
+def _record_remote_write_observations(
+    connection: sqlite3.Connection,
+    payload: dict[str, Any],
+    *,
+    agent: str,
+    command: str,
+    cwd: str,
+    revision: str,
+) -> None:
+    operations = _audit_remote_write_kinds(command, cwd)
+    if not operations:
+        return
+    agent_id = payload.get("agent_id")
+    has_agent_id = isinstance(agent_id, str) and bool(agent_id.strip())
+    # Claude documents agent_id on subagent tool events. A client label and
+    # payload field are observations, never a trusted publication grant. Missing
+    # metadata does not prove root identity, even though legacy activity scoping
+    # uses "root" as its default key.
+    reported_role = "worker" if agent == "claude" and has_agent_id else "unknown"
+    role_source = (
+        "claude.agent_id" if reported_role == "worker"
+        else "unvalidated-client.agent_id" if has_agent_id
+        else "missing-agent-id"
+    )
+    session_id, _, _ = _payload_context(payload)
+    agent_scope = _runtime_id("agent", agent_id) if has_agent_id else "unknown"
+    runtime = json.dumps(_payload_runtime(payload), sort_keys=True)
+    for operation in sorted(operations):
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO remote_write_observations (
+                observed_at, session_id, agent_scope, tool_use_id, agent,
+                reported_role, role_source, operation, skill_revision, runtime_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                isoformat(utc_now()), session_id, agent_scope,
+                _tool_use_id(payload) or None, agent, reported_role, role_source,
+                operation, revision or skill_revision(), runtime,
+            ),
+        )
+
+
 def _pre_tool_use(
     connection: sqlite3.Connection,
     payload: dict[str, Any],
@@ -3304,9 +3949,10 @@ def _pre_tool_use(
     mode: str,
 ) -> dict[str, Any] | None:
     session_id, cwd, _ = _payload_context(payload)
+    command = _command_from_payload(payload)
     writes = [
         op
-        for op in classify_gh_operations(_command_from_payload(payload), cwd)
+        for op in classify_gh_operations(command, cwd)
         if op.kind == "write"
     ]
     revision = skill_revision() if writes else ""
@@ -3315,6 +3961,10 @@ def _pre_tool_use(
         # connect-time migration. Absorb them under the same writer lock as
         # this event so its state transition cannot race past pending work.
         _migrate_legacy_hook_state(connection)
+        _record_remote_write_observations(
+            connection, payload, agent=agent, command=command, cwd=cwd,
+            revision=revision,
+        )
         turn_id = _turn_id(connection, payload, remember_tool=True)
         violations = [
             op
@@ -3333,6 +3983,7 @@ def _pre_tool_use(
                 outcome=outcome,
                 revision=revision,
                 detail="GitHub write attempted without a separate successful live-state read.",
+                **_payload_runtime(payload),
             )
         if not denied:
             violation_keys = {operation.workflow_key for operation in violations}
@@ -3347,6 +3998,7 @@ def _pre_tool_use(
                         outcome="passed",
                         revision=revision,
                         detail="Separate live-state read observed before the write attempt.",
+                        **_payload_runtime(payload),
                     )
                 if _creation_group(operation) is not None:
                     _increment_create_attempt(
@@ -3368,7 +4020,23 @@ def _pre_tool_use(
     if not violations:
         return None
     labels = ", ".join(sorted({operation.workflow_label for operation in violations}))
-    reason = f"Run and inspect a separate live-state read before writing to {labels}."
+    unresolved = [
+        op
+        for op in violations
+        if _target_resolution(op.workflow_key, op.workflow_label) == "unresolved_target"
+    ]
+    if len(unresolved) == len(violations):
+        reason = (
+            f"Cannot establish an exact GitHub target for {labels}; preflight "
+            "verification is unsupported. Use a statically identified target. "
+            "This coverage gap is not proof that no read occurred."
+        )
+    else:
+        reason = (
+            f"Run and inspect a separate live-state read before writing to {labels}."
+        )
+        if unresolved:
+            reason += " Some targets are unresolved; those checks are coverage gaps, not demonstrated violations."
     if mode == "enforce":
         return {
             "hookSpecificOutput": {
@@ -3532,6 +4200,7 @@ def _post_tool_use(
                     outcome="passed",
                     revision=revision,
                     detail="Separate post-write readback observed.",
+                    **_payload_runtime(payload),
                 )
 
         for write in writes:
@@ -3582,6 +4251,7 @@ def _finalize_session_activity(
     clear_tools: bool,
     clear_session: bool = False,
     revision: str | None = None,
+    runtime: dict[str, str | None] | None = None,
 ) -> list[str]:
     current_revision = revision or skill_revision()
     with _write_transaction(connection):
@@ -3604,6 +4274,7 @@ def _finalize_session_activity(
                 outcome="escaped",
                 revision=current_revision,
                 detail=detail,
+                **(runtime or {}),
             )
         connection.execute(
             "DELETE FROM hook_activity WHERE session_id = ?", (session_id,)
@@ -3665,6 +4336,7 @@ def _stop(
                 outcome=outcome,
                 revision=revision,
                 detail="Turn stopped with an unverified GitHub write.",
+                **_payload_runtime(payload),
             )
         if not should_block:
             if agent == "codex":
@@ -3677,7 +4349,21 @@ def _stop(
             else:
                 _clear_turn_state(connection, session_id, turn_id)
     labels = ", ".join(row["workflow_label"] for row in pending)
-    reason = f"Re-read and verify the GitHub write to {labels} before finishing."
+    unresolved = [
+        row
+        for row in pending
+        if _target_resolution(row["workflow_key"], row["workflow_label"])
+        == "unresolved_target"
+    ]
+    if len(unresolved) == len(pending):
+        reason = (
+            f"Cannot match an exact readback for unresolved GitHub targets: {labels}. "
+            "This is a target-resolution coverage gap, not proof that no readback occurred."
+        )
+    else:
+        reason = f"Re-read and verify the GitHub write to {labels} before finishing."
+        if unresolved:
+            reason += " Some targets are unresolved; those checks are coverage gaps, not demonstrated violations."
     if should_block:
         return {"decision": "block", "reason": reason}
     return {"systemMessage": f"SECQUOIA audit ({INSTALLATION_ID}): {reason}"}
@@ -3705,6 +4391,7 @@ def _user_prompt_submit(
             ),
             clear_tools=False,
             revision=revision,
+            runtime=_payload_runtime(payload),
         )
     if not labels:
         return None
@@ -3737,6 +4424,7 @@ def _session_start(
         detail="A session boundary was reached with an unverified GitHub write.",
         clear_tools=True,
         clear_session=True,
+        runtime=_payload_runtime(payload),
     )
     if not labels:
         return None
@@ -3768,6 +4456,7 @@ def _finalize_nonblocking_boundary(
         detail=detail,
         clear_tools=True,
         clear_session=clear_session,
+        runtime=_payload_runtime(payload),
     )
 
 
@@ -3835,7 +4524,26 @@ def _owned_handler(handler: Any) -> bool:
     )
 
 
-def _remove_owned_hooks(document: dict[str, Any]) -> bool:
+def _remove_owned_hooks(
+    document: dict[str, Any], scripts: Iterable[Path] | None = None
+) -> bool:
+    allowed = {str(path.resolve()) for path in scripts} if scripts is not None else None
+
+    def removable(handler: Any) -> bool:
+        if not _owned_handler(handler):
+            return False
+        if allowed is None:
+            return True
+        try:
+            command = shlex.split(handler["command"])
+        except (TypeError, ValueError):
+            return False
+        return (
+            len(command) > 2
+            and command[2] == "hook"
+            and str(Path(command[1]).resolve()) in allowed
+        )
+
     changed = False
     hooks = document.get("hooks")
     if not isinstance(hooks, dict):
@@ -3849,9 +4557,7 @@ def _remove_owned_hooks(document: dict[str, Any]) -> bool:
             if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
                 kept_groups.append(group)
                 continue
-            handlers = [
-                handler for handler in group["hooks"] if not _owned_handler(handler)
-            ]
+            handlers = [handler for handler in group["hooks"] if not removable(handler)]
             if len(handlers) != len(group["hooks"]):
                 changed = True
             if handlers:
@@ -3920,7 +4626,7 @@ def install_codex_hooks(
     document = _load_hooks(hooks_path)
     _remove_owned_hooks(document)
     command = (
-        f"/usr/bin/python3 {shlex.quote(str(script))} hook --agent codex "
+        f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} hook --agent codex "
         f"--mode {mode} --installation-id {INSTALLATION_ID}"
     )
     handler = {
@@ -3958,7 +4664,7 @@ def install_claude_hooks(
     document = _load_hook_document(settings_path, {"hooks": {}})
     _remove_owned_hooks(document)
     command = (
-        f"/usr/bin/python3 {shlex.quote(str(script))} hook --agent claude "
+        f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} hook --agent claude "
         f"--mode {mode} --installation-id {INSTALLATION_ID}"
     )
     handler = {"type": "command", "command": command, "timeout": 5}
@@ -3986,11 +4692,13 @@ def install_claude_hooks(
     return settings_path, backup
 
 
-def uninstall_claude_hooks(settings_path: Path) -> tuple[Path, Path | None, bool]:
+def uninstall_claude_hooks(
+    settings_path: Path, scripts: Iterable[Path] | None = None
+) -> tuple[Path, Path | None, bool]:
     if not settings_path.exists():
         return settings_path, None, False
     document = _load_hook_document(settings_path, {"hooks": {}})
-    changed = _remove_owned_hooks(document)
+    changed = _remove_owned_hooks(document, scripts)
     if not changed:
         return settings_path, None, False
     if document.get("hooks") == {}:
@@ -4000,12 +4708,14 @@ def uninstall_claude_hooks(settings_path: Path) -> tuple[Path, Path | None, bool
     return settings_path, backup, True
 
 
-def uninstall_codex_hooks(codex_home: Path) -> tuple[Path, Path | None, bool]:
+def uninstall_codex_hooks(
+    codex_home: Path, scripts: Iterable[Path] | None = None
+) -> tuple[Path, Path | None, bool]:
     hooks_path = codex_home / "hooks.json"
     if not hooks_path.exists():
         return hooks_path, None, False
     document = _load_hooks(hooks_path)
-    changed = _remove_owned_hooks(document)
+    changed = _remove_owned_hooks(document, scripts)
     if not changed:
         return hooks_path, None, False
     backup = _backup_if_present(hooks_path)
@@ -4026,6 +4736,7 @@ def _command_record(args: argparse.Namespace) -> int:
             revision=args.skill_revision or skill_revision(),
             detail=args.detail,
             dedupe_hours=args.dedupe_hours,
+            **{field: getattr(args, field, None) for field in RUNTIME_FIELDS},
         )
     finally:
         connection.close()
@@ -4035,6 +4746,19 @@ def _command_record(args: argparse.Namespace) -> int:
 
 def _command_report(args: argparse.Namespace) -> int:
     with report_database(args.state_dir) as connection:
+        if getattr(args, "remote_write_audit", False):
+            audit = report_remote_write_observations(connection, since_days=args.since_days)
+            if args.json:
+                print(json.dumps(audit, indent=2))
+            else:
+                print(audit["coverage_note"])
+                for row in audit["observations"]:
+                    print(
+                        f"{row['agent']} role={row['reported_role']} "
+                        f"source={row['role_source']}: {row['attempts']} "
+                        f"{row['operation']} attempts; revision={row['skill_revision']}"
+                    )
+            return 0
         if connection is None:
             rows = []
         else:
@@ -4058,6 +4782,27 @@ def _command_report(args: argparse.Namespace) -> int:
             f"across {row['distinct_targets']} targets / {row['opportunities']} opportunities "
             f"({row['prevented']} prevented, {row['escaped']} escaped); "
             f"agents={','.join(row['agents'])}; {row['description']}"
+        )
+        for cohort in row["runtime_observations"]:
+            labels = ", ".join(
+                f"{field}={cohort[field] or 'unknown'}" for field in RUNTIME_FIELDS
+            )
+            print(
+                f"  Observed events: agent={cohort['agent']}, {labels}, "
+                f"event={cohort['event']}, revision={cohort['skill_revision']}; "
+                f"{cohort['observations']} observations "
+                f"({cohort['passed']} passed, {cohort['prevented']} prevented, "
+                f"{cohort['escaped']} escaped; {cohort['unresolved_target']} unresolved target observations)."
+            )
+        print(
+            f"  Target coverage: {row['unresolved_target_episodes']} unresolved episodes; "
+            f"{row['legacy_inferred_target_episodes']} legacy episode assessments inferred "
+            f"from labels; eligible for lessons={row['eligible_for_lessons']}. "
+            f"{row['target_resolution_note']}"
+        )
+        print(
+            f"  Legacy observations with unknown runtime/outcome: "
+            f"{row['unattributed_legacy_observations']}. {row['attribution_note']}"
         )
     return 0
 
@@ -4095,6 +4840,11 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--agent", required=True)
     record.add_argument("--outcome", required=True, choices=sorted(OUTCOME_RANK))
     record.add_argument("--skill-revision")
+    for field in RUNTIME_FIELDS:
+        record.add_argument(
+            "--" + field.replace("_", "-"),
+            help="optional observed runtime label; omit when unknown",
+        )
     record.add_argument("--detail", default="")
     record.add_argument("--dedupe-hours", type=int, default=DEFAULT_DEDUPE_HOURS)
     record.add_argument("--state-dir")
@@ -4107,6 +4857,10 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--min-encounters", type=int, default=DEFAULT_MIN_ENCOUNTERS)
     report.add_argument("--state-dir")
     report.add_argument("--json", action="store_true")
+    report.add_argument(
+        "--remote-write-audit", action="store_true",
+        help="show separate remote-write attempt observations, without authorization judgments",
+    )
     report.set_defaults(function=_command_report)
 
     hook = subparsers.add_parser(
@@ -4141,9 +4895,15 @@ def build_parser() -> argparse.ArgumentParser:
         "uninstall-codex-hooks", help="remove owned Codex handlers"
     )
     uninstall.add_argument("--codex-home", type=Path, required=True)
+    uninstall.add_argument(
+        "--script",
+        type=Path,
+        action="append",
+        help="remove only hooks for this script (repeatable)",
+    )
 
     def command_uninstall(args: argparse.Namespace) -> int:
-        path, backup, changed = uninstall_codex_hooks(args.codex_home)
+        path, backup, changed = uninstall_codex_hooks(args.codex_home, args.script)
         if changed:
             print(f"Removed Codex encounter hooks from {path}; backup: {backup}.")
         else:
@@ -4181,9 +4941,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path.home() / ".claude" / "settings.json",
     )
+    claude_uninstall.add_argument(
+        "--script",
+        type=Path,
+        action="append",
+        help="remove only hooks for this script (repeatable)",
+    )
 
     def command_uninstall_claude(args: argparse.Namespace) -> int:
-        path, backup, changed = uninstall_claude_hooks(args.settings_path)
+        path, backup, changed = uninstall_claude_hooks(args.settings_path, args.script)
         if changed:
             print(f"Removed Claude encounter hooks from {path}; backup: {backup}.")
         else:

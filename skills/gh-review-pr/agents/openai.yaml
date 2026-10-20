@@ -1,4 +1,4 @@
 interface:
   display_name: "Review PR"
-  short_description: "Review a PR as maintainer"
-  default_prompt: "Use $gh-review-pr <PR-number-or-url> to post a senior maintainer review."
+  short_description: "Post a maintainer PR review"
+  default_prompt: "Use $gh-review-pr <PR-number-or-url> to post a maintainer review of the current head."
