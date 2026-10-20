@@ -76,7 +76,7 @@ def backup_copy(destination: Path) -> Path:
     return backup
 
 
-def prune_retired(root: Path, source_root: Path) -> None:
+def prune_retired(root: Path, source_root: Path | list[Path]) -> None:
     for destination in retired_entries(root, source_root):
         if destination.is_symlink():
             destination.unlink()

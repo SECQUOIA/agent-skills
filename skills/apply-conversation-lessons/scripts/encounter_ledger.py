@@ -3530,7 +3530,7 @@ def _successful_response(payload: dict[str, Any], agent: str) -> bool:
         return False
     if agent == "antigravity":
         error = payload.get("error")
-        exit_code = payload.get("exitCode", payload.get("exit_code", 0))
+        exit_code = payload.get("exitCode") or payload.get("exit_code") or 0
         return not bool(error or exit_code)
     response = payload.get("tool_response")
     if response is None:

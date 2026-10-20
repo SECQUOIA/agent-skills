@@ -373,6 +373,20 @@ class InstallationTests(unittest.TestCase):
         self.run_script("uninstall")
         self.assertFalse((self.antigravity / "sample-skill").exists())
 
+    def test_antigravity_home_custom_directory_override(self):
+        custom_gemini = self.home / "custom_gemini"
+        custom_skills = custom_gemini / "skills"
+        self.run_script("install", f"--antigravity-home={custom_gemini}", "--antigravity-hooks=audit")
+        self.assertTrue((custom_skills / "sample-skill").is_symlink())
+        hooks_file = custom_gemini / "hooks.json"
+        self.assertTrue(hooks_file.is_file())
+        data = json.loads(hooks_file.read_text())
+        self.assertIn("secquoia-hooks", data)
+        self.run_script("uninstall", f"--antigravity-home={custom_gemini}")
+        self.assertFalse((custom_skills / "sample-skill").exists())
+        updated_data = json.loads(hooks_file.read_text())
+        self.assertNotIn("secquoia-hooks", updated_data)
+
     def test_antigravity_hooks_installation_and_uninstallation(self):
         self.run_script("install", "--antigravity-hooks=audit")
         hooks_file = self.home / ".gemini/config/hooks.json"
