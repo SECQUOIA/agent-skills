@@ -126,6 +126,7 @@ TARGETED_ACTIONS = {
 IGNORED_GROUPS = {
     "--help",
     "--version",
+    "-h",
     "alias",
     "auth",
     "completion",
@@ -167,20 +168,27 @@ GH_VALUE_FLAGS = FLAGS_WITH_VALUES | {
     "--assignee",
     "--attempt",
     "--author",
+    "--author-email",
     "--base",
     "--branch",
     "--category",
     "--color",
+    "--comment",
+    "--description",
     "--discussion-category",
     "--head",
+    "--homepage",
     "--interval",
     "--job",
     "--json",
     "--label",
     "--limit",
+    "--match-head-commit",
     "--milestone",
+    "--name",
     "--notes",
     "--notes-file",
+    "--notes-start-tag",
     "--output",
     "--pattern",
     "--project",
@@ -195,6 +203,8 @@ GH_VALUE_FLAGS = FLAGS_WITH_VALUES | {
     "--state",
     "--subject",
     "--tag",
+    "--target",
+    "--visibility",
     "-A",
     "-B",
     "-L",
@@ -215,11 +225,28 @@ GH_VALUE_FLAGS = FLAGS_WITH_VALUES | {
 GH_ACTION_BOOLEAN_FLAGS = {
     ("pr", "checkout"): {"-f"},
     ("pr", "merge"): {"-m", "-s"},
-    ("pr", "review"): {"-a"},
+    ("pr", "review"): {"-a", "--comment"},
+    ("repo", "edit"): {"--template"},
+    ("secret", "delete"): {"--user"},
+    ("secret", "list"): {"--user"},
+    ("secret", "set"): {"--user"},
+    ("workflow", "run"): {"--json"},
 }
 GH_ACTION_VALUE_FLAGS = {
+    ("issue", "close"): {"-c", "-r"},
     ("issue", "edit"): {"-m"},
+    ("issue", "lock"): {"-r"},
+    ("issue", "reopen"): {"-c"},
+    ("label", "create"): {"-c", "-d"},
+    ("label", "edit"): {"-c", "-d"},
+    ("pr", "close"): {"-c"},
     ("pr", "edit"): {"-m"},
+    ("pr", "lock"): {"-r"},
+    ("pr", "reopen"): {"-c"},
+    ("repo", "create"): {"-d", "-h"},
+    ("repo", "edit"): {"-d", "-h"},
+    ("run", "rerun"): {"-j"},
+    ("run", "view"): {"-j"},
 }
 
 
@@ -2881,15 +2908,40 @@ def _graphql_target(
     return repo, f"graphql:{_target_digest(scope)}", f"{repo}:graphql"
 
 
-def _positional_candidates(tokens: list[str], group: str, action: str) -> list[str]:
-    candidates: list[str] = []
+def _gh_value_flags(group: str, action: str) -> set[str]:
     boolean_flags = GH_ACTION_BOOLEAN_FLAGS.get((group, action), set())
-    value_flags = (
+    return (
         GH_VALUE_FLAGS | GH_ACTION_VALUE_FLAGS.get((group, action), set())
     ) - boolean_flags
+
+
+def _is_gh_help_request(tokens: list[str], group: str, action: str) -> bool:
+    if group in IGNORED_GROUPS:
+        return True
+    value_flags = _gh_value_flags(group, action)
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            return False
+        if token in value_flags:
+            index += 2
+            continue
+        if token in {"--help", "-h"} or token.startswith("--help="):
+            return True
+        index += 1
+    return False
+
+
+def _positional_candidates(tokens: list[str], group: str, action: str) -> list[str]:
+    candidates: list[str] = []
+    value_flags = _gh_value_flags(group, action)
     index = 3
     while index < len(tokens):
         token = tokens[index]
+        if token == "--":
+            candidates.extend(tokens[index + 1 :])
+            break
         if token in value_flags:
             index += 2
             continue
@@ -3067,6 +3119,10 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
     ):
         if len(tokens) < 2:
             continue
+        group = tokens[1]
+        action = tokens[2] if len(tokens) > 2 else ""
+        if _is_gh_help_request(tokens, group, action):
+            continue
         operation_cwd = context.working_directory
         if (
             context.repository_scope_changed
@@ -3074,10 +3130,6 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
             and not _has_explicit_repository_scope(tokens, operation_cwd)
         ):
             tokens = [*tokens, "--repo", WRAPPER_CWD_SENTINEL]
-        group = tokens[1]
-        action = tokens[2] if len(tokens) > 2 else ""
-        if group in IGNORED_GROUPS:
-            continue
         if group == "api":
             kind = _api_kind(tokens, operation_cwd)
         elif group == "repo" and action == "set-default" and "--view" in tokens[3:]:
