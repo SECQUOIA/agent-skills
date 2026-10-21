@@ -22,6 +22,14 @@ change only the smallest appropriate owner.
    `python -B <skill>/scripts/encounter_ledger.py report --json` before triage.
    Use [evidence guidance](references/evidence.md) to interpret its revisions,
    modes, and model attribution. Do not equate classifier flags with model errors.
+   If a helper returns `ENOENT` despite being readable through another tool,
+   inspect its symlink destination and the executing sandbox's filesystem
+   visibility before declaring it missing. Resolve the path with `readlink -f`
+   where available; execution outside permitted roots requires supported,
+   authorized filesystem access, which may involve Antigravity's
+   `BypassSandbox: true` when allowed by the active runtime. If that access is
+   unavailable, report the helper as inaccessible and continue triage using
+   available evidence.
 4. Keep lessons that prevent plausible wrong results, silent damage, or repeated
    expensive rediscovery. Retire one-off facts, obvious recoverable command errors,
    generic advice, and preferences already supplied by higher-level instructions.

@@ -100,6 +100,14 @@ manifests alone do not prove the PR cannot cause an install failure. One authori
 bounded rerun can test a suspected transient failure. Preserve a still-red required
 check as a merge gate even when its likely cause is infrastructure.
 
+Before rerunning a failed matrix, inspect `fail-fast` and distinguish failed jobs
+from siblings cancelled before completing verification. If an unchanged
+reproducible failure would be included in `--failed`, prefer an authorized
+targeted rerun of cancelled jobs using
+`gh run rerun <run-id> --repo OWNER/REPO --job <databaseId>`, checking the
+dependency scope, or report the remaining coverage gap. Preserve the original
+failure in the handoff; recovered sibling coverage does not make the workflow green.
+
 For warning-only docs builds changed by the PR, compare relevant warnings with
 base evidence when needed to establish a regression. Read final build logs rather
 than intermediate-pass output. For a new strict gate, separate repository-owned

@@ -33,7 +33,7 @@ Immediately before merging re-read state/head/gates, then run `gh pr merge <pr> 
 
 ## Post-merge handoff
 
-Read [post-merge follow-through](references/post-merge.md) when there are base workflows, linked issues, generated deliverables, local synchronization, installer-managed skills, siblings, or requested next-work recommendations. Observe expected checks for the merge commit within the shared bound, distinguishing pending from failing and CI from deployment/security workflows. Do not claim remote work completed when observation is still pending.
+Read [post-merge follow-through](references/post-merge.md) when there are base workflows, linked issues, generated deliverables, local synchronization, installer-managed skills, siblings, or requested next-work recommendations. Observe expected checks for the merge commit within the observation budget defined in post-merge follow-through, distinguishing pending from failing and CI from deployment/security workflows. Do not claim remote work completed when observation is still pending.
 
 Verify closure of original trackers and follow-up issues under [post-merge follow-through](references/post-merge.md). Manual closure needs merge-as-completion authorization or established issue-series policy, and fulfilled criteria or an explicit maintainer-approved deferral. Report incomplete work and its closure path; do not claim live validation that has not occurred.
 

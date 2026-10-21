@@ -20,6 +20,13 @@ Use for target/ref identity and complete inventories. For CLI failures, use
 - Use structured fields sufficient for the decision, including `url`, `number`,
   state, and PR `headRefOid`. Bind reusable GraphQL query variables instead of
   replacing text. Check returned identity before using IDs for mutations.
+  For merge readiness requiring repository merge settings and review threads, use
+  `gh api graphql` with repository fields `mergeCommitAllowed`,
+  `squashMergeAllowed`, `rebaseMergeAllowed`, and `deleteBranchOnMerge`, plus the
+  needed `pullRequest` fields and paginated connections. Use GraphQL for
+  `baseRefOid` or `closingIssuesReferences` when the installed CLI does not
+  expose them, and REST `repos/OWNER/REPO/pulls/<N>` for `rebaseable` when
+  selecting rebase.
 
 ## Ref-pinned source
 
