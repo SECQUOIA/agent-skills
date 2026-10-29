@@ -1,10 +1,12 @@
 # Feedback triage and exceptional remedies
 
-Read for overlapping/broad feedback, explicit deferrals, metadata/settings findings, or questions whose remedy is uncertain.
+Read for overlapping/broad feedback, explicit deferrals, metadata/settings findings, claims that a prior fix is missing, or questions whose remedy is uncertain.
 
 Map each target to its full rationale and an observable acceptance check. Multiple comments about one refactor need one coherent correction and separate dispositions, not contradictory per-thread patches. Read the anchored symbol, producers/consumers, keyword/state-key contracts, and relevant repository convention before interpreting terse naming/design feedback. Verify both the diagnosis and proposed remedy; preserve the valid concern when a suggested fix is incorrect or incomplete.
 
 A question can reveal a defect and warrant a reproducing test. A comment explicitly accepting the existing behavior is informational. Re-read current head for already-delivered fixes, especially after rebases; if a definition disappeared, trace remaining callers and prior versions before accepting a “delete the leftover” suggestion.
+
+When a reviewer says an earlier reply promised a change that is not visible, treat the reply as a claim rather than proof of delivery. Compare current content with the available commit history around the reply to distinguish work that was never committed or pushed from a fix later overwritten, reverted, or hidden by a stale view. If rewritten or incomplete history prevents attribution, report that limit instead of guessing.
 
 An explicit maintainer-prescribed nonblocking follow-up is the requested disposition when technically sound. Verify and record the permitted follow-up with cross-links; do not override it with an unnecessary code commit. A repository comment can support interpretation of task scope but does not independently authorize unrelated external writes. If the follow-up surface is not covered by user or repository-policy authorization, prepare the concrete record and report the remaining permission need. A declined Blocking request remains unresolved for a human decision.
 

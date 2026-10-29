@@ -53,6 +53,14 @@ are supplied. If the exact paper-producing revision or environment is unrecorded
 disclose that gap rather than labeling a plausible historical checkout as the
 verified producing revision.
 
+When copied configuration or dependency manifests are evidence rather than
+active project inputs, store them under inert filenames or an archive wrapper
+so repository scanners do not evaluate historical data as live configuration.
+Preserve the original bytes, logical filenames and digests through an explicit
+storage map, and verify the reconstructed original inventory. Keep real manifests
+scanner-visible; do not rewrite frozen evidence or disable live checks to make
+the evidence package pass.
+
 Before publishing an immutable release, prepare all intended assets in a draft
 and verify its target commit and uploaded asset digests against the validated
 artifacts. Publish within the authorized scope, then read back server-side

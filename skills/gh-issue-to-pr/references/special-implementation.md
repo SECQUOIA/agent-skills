@@ -2,7 +2,7 @@
 
 Read only the routes relevant to the requested behavior.
 
-- Scientific algorithms, units, solver guarantees, or papers: use [scientific verification](../../gh-workflow-conventions/references/scientific-verification.md). Separate desired outcome from a cited mechanism; verify assumptions/resource constraints against the primary source. Trace and document units in changed expressions and tests.
+- Scientific algorithms, units, solver guarantees, papers, or formalizations: use [scientific verification](../../gh-workflow-conventions/references/scientific-verification.md). Separate desired outcome from a cited mechanism; verify assumptions/resource constraints against the primary source. Trace and document units in changed expressions and tests.
 - Notebook, parity, or live-service work: use [notebook guidance](../../gh-workflow-conventions/references/notebook-artifacts.md). Inventory corresponding source/target workflows including downstream outputs; decide execution/output scope explicitly. Preserve useful diagnostics and safe local configuration when replacing credential setup. Never commit secret-bearing output.
 - Shared setup/configuration: inspect sibling artifact families, but verify each shares the defective contract before expanding the fix. Current base may already satisfy parts of a stale example.
 - Dependencies/adapters, compatibility bounds, or dependency security mitigations: use [dependency contracts](../../gh-workflow-conventions/references/dependency-contracts.md). Preserve existing compatible allowances unless evidence requires narrowing, and validate pinned runtime objects rather than copying assumed field names.

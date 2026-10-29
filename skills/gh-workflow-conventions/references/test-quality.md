@@ -55,7 +55,7 @@ that scope or describe downstream executable tests as already delivered.
 
 | Trigger | Reference |
 |---|---|
-| Scientific equations, units, optimization guarantees, benchmarks, DOI/citation checks | [Scientific verification](scientific-verification.md) |
+| Scientific equations, formal proof/manuscript correspondence, units, optimization guarantees, benchmarks, DOI/citation checks | [Scientific verification](scientific-verification.md) |
 | Committed notebooks, outputs, execution provenance, stochastic samples | [Notebook artifacts](notebook-artifacts.md) |
 | Generated tables, figures, documents, archives, rendered parity | [Artifact verification](artifact-verification.md) |
 | Replacement dependencies, API compatibility, optional backends, CI test selection | [Dependency and API contracts](dependency-contracts.md) |

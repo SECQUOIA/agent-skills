@@ -2658,13 +2658,26 @@ class EncounterLedgerTests(unittest.TestCase):
         cases = (
             ("gh pr merge -s 11 --repo owner/repo", "owner/repo#11"),
             ("gh pr merge -m 11 --repo owner/repo", "owner/repo#11"),
+            (
+                "gh pr merge --match-head-commit 1234567 11 --repo owner/repo",
+                "owner/repo#11",
+            ),
+            (
+                "gh pr merge --match-head-commit deadbeef 11 --repo owner/repo",
+                "owner/repo#11",
+            ),
             ("gh pr review -a 11 --repo owner/repo", "owner/repo#11"),
+            ("gh pr review --comment 11 --repo owner/repo", "owner/repo#11"),
+            ("gh pr close -c done 11 --repo owner/repo", "owner/repo#11"),
             ("gh pr checkout -f 11 --repo owner/repo", "owner/repo#11"),
             ("gh issue edit -m 12 99 --repo owner/repo", "owner/repo#99"),
             ("gh issue edit 99 -m 12 --repo owner/repo", "owner/repo#99"),
             ("gh pr edit -m 12 99 --repo owner/repo", "owner/repo#99"),
             ("gh pr edit 99 -m 12 --repo owner/repo", "owner/repo#99"),
             ("gh pr view --json state 11 --repo owner/repo", "owner/repo#11"),
+            ("gh repo edit -h https://example.com owner/repo", "owner/repo:repo"),
+            ("gh repo edit --template owner/repo", "owner/repo:repo"),
+            ("gh secret set --user MY_SECRET --repo owner/repo", "owner/repo:secret"),
         )
         for command, label in cases:
             with self.subTest(command=command):
@@ -2679,6 +2692,72 @@ class EncounterLedgerTests(unittest.TestCase):
         )[0]
         self.assertNotEqual(no_target.workflow_label, "owner/repo#5")
         self.assertEqual(explicit_target.workflow_label, "owner/repo#11")
+
+    def test_gh_help_requests_neither_trigger_writes_nor_authorize_reads(self):
+        help_commands = (
+            "gh -h",
+            "gh pr --help",
+            "gh pr -h",
+            "gh pr view --help",
+            "gh run rerun --help",
+            "gh pr merge 11 --repo owner/repo --help",
+            "gh pr merge 11 --repo owner/repo -h",
+            "gh pr view 11 --repo owner/repo --help",
+            "gh api repos/owner/repo/pulls/11 --help",
+            "gh --version && gh pr view --help && gh run rerun --help",
+        )
+        for command in help_commands:
+            with self.subTest(command=command):
+                self.assertEqual(ledger.classify_gh_operations(command, "/tmp"), [])
+
+        write_commands = (
+            ("gh pr comment 11 --repo owner/repo --body --help", "owner/repo#11"),
+            (
+                "gh pr comment 11 --repo owner/repo --body done -- --help",
+                "owner/repo#11",
+            ),
+            ("gh repo edit owner/repo -h https://example.com", "owner/repo:repo"),
+            ("gh api help -X POST", "unknown-repo:api:api"),
+        )
+        for command, label in write_commands:
+            with self.subTest(command=command):
+                operations = ledger.classify_gh_operations(command, "/tmp")
+                self.assertEqual(len(operations), 1)
+                self.assertEqual(operations[0].kind, "write")
+                self.assertEqual(operations[0].workflow_label, label)
+
+        state_dir = str(Path(self.state_dir) / "help-does-not-authorize")
+        self.assertIsNone(
+            ledger.run_hook(
+                hook_payload("PreToolUse", "gh run rerun --help"),
+                agent="codex",
+                mode="enforce",
+                explicit_state_dir=state_dir,
+            )
+        )
+        ledger.run_hook(
+            hook_payload("PostToolUse", "gh run rerun --help", {"exit_code": 0}),
+            agent="codex",
+            mode="enforce",
+            explicit_state_dir=state_dir,
+        )
+        ledger.run_hook(
+            hook_payload(
+                "PostToolUse",
+                "gh pr view 11 --repo owner/repo --help",
+                {"exit_code": 0},
+            ),
+            agent="codex",
+            mode="enforce",
+            explicit_state_dir=state_dir,
+        )
+        denied = ledger.run_hook(
+            hook_payload("PreToolUse", "gh pr merge 11 --repo owner/repo --squash"),
+            agent="codex",
+            mode="enforce",
+            explicit_state_dir=state_dir,
+        )
+        self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_action_specific_flag_arity_preserves_exact_authorization(self):
         wrong_read = "gh issue view 12 --repo owner/repo --json state"

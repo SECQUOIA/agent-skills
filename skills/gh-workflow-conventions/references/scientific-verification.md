@@ -1,8 +1,9 @@
 # Scientific and Numerical Verification
 
-Use for changed scientific contracts, reported quantitative results, solver claims,
-and requested benchmark work. Scope the audit to changed equations and relevant
-call paths; generic code changes do not require a scientific audit.
+Use for changed scientific contracts, manuscript/formal-proof claims, reported
+quantitative results, solver claims, and requested benchmark work. Scope the audit
+to changed claims, equations, and relevant call paths; generic code changes do not
+require a scientific audit.
 
 ## Equations, units, and independent checks
 
@@ -26,6 +27,23 @@ against the model before tuning tolerance; derive tolerance from numerical error
 solver settings, or an accepted physical accuracy. Do not repeatedly loosen a
 constant to fit one machine. After conflict resolution, revisit only units/contracts
 whose inputs or call paths changed.
+
+## Formal proofs and manuscript claims
+
+For proof-assistant work, separate kernel acceptance from semantic correspondence
+and novelty. Map each claimed result to its formal endpoint, definitions,
+quantifiers, hypotheses, and conventions; expose assumed bridges or weaker
+endpoints. Counts and a clean build do not validate manuscript claims or external
+numerical code.
+
+When proof-route fidelity is requested, inspect every supplied written argument:
+a paper may give multiple routes or omit a promised proof. Record where the
+formalization follows, strengthens, replaces, or cannot complete those steps.
+Add alternatives only within requested scope, retain valid prior proofs, and
+disclose shared lemmas; alternate routes need not be independent foundational
+checks. Report the inspected source snapshot, toolchain, trusted axioms/admissions,
+and remaining unformalized claims. Distinguish gaps in exposition from false
+statements, and seek counterexamples before labeling a theorem incorrect.
 
 ## Tables and literature
 
