@@ -12,6 +12,13 @@ mtimes can cause `make`/`latexmk` to declare committed targets up to date. Confi
 actually wrote the output. A generator with missing inputs should fail before
 clobbering a committed artifact with empty/placeholder content.
 
+For generators that recursively replace an output directory, validate the resolved
+deletion target before any cleanup, including symlink aliases. Reject
+repository/source roots and targets containing required inputs; establish that the
+resolved directory is disposable task-owned output rather than trusting its
+conventional name. Complete required-input checks before removal so failed
+preflight preserves the previous artifact.
+
 If a check archives `HEAD`, its pass covers that commit, not uncommitted candidate
 artifacts. Use a scratch candidate commit or materialized candidate tree. Recheck
 only after relevant artifact/source changes. For cross-platform numeric last-bit
