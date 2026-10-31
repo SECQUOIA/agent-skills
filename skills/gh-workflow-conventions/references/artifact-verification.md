@@ -68,12 +68,19 @@ storage map, and verify the reconstructed original inventory. Keep real manifest
 scanner-visible; do not rewrite frozen evidence or disable live checks to make
 the evidence package pass.
 
-Before publishing an immutable release, prepare all intended assets in a draft
-and verify its target commit and uploaded asset digests against the validated
-artifacts. Publish within the authorized scope, then read back server-side
-immutability and intended tag protections before claiming a protected snapshot;
-a tag or "frozen" label alone establishes neither. Correct immutable artifacts
-through a new version rather than silently relabeling their provenance.
+Before publishing an immutable release, verify the live immutability policy that
+will apply to this publication; an older immutable release does not establish
+the current policy. Prepare all intended assets in a draft and verify its target
+commit and uploaded asset digests against the validated artifacts. If the promised
+protections are disabled, establish an authorized way to activate them for first
+publication; do not publish mutable assets with a plan to lock them later.
+
+Publish within the authorized scope, then read back server-side immutability and
+intended tag protections before claiming a protected snapshot. When a temporary
+policy change is authorized, record its prior state before changing it and restore
+it after publication; verify the new release remains protected after restoration.
+A tag or "frozen" label alone establishes neither protection. Correct immutable
+artifacts through a new version rather than silently relabeling their provenance.
 
 ## Rendered contracts
 
