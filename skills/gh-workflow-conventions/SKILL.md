@@ -34,6 +34,11 @@ adding helpers or recommending a different model or effort, read
   documented outputs; “commit and push only,” “draft,” or “do not post” narrows
   them. Do not infer permission for another publication surface, access change,
   destructive cleanup, or an edit to published history.
+- Before sending private material to an external model or reviewer service,
+  check that existing authorization covers that destination and payload.
+  Permission for repository writes alone does not establish that scope. Reuse
+  consent within its stated limits; a one-packet approval covers the approved
+  contents, not added data or another service.
 - Publication includes Git pushes and GitHub mutations: PRs, reviews, comments,
   replies, reviewer requests, thread resolution, labels, merges, and releases.
   The agent handling the user's overall task is the default publisher, including
