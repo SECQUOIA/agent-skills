@@ -21,6 +21,15 @@ verified snapshot; do not assume `reset --hard` is safe because an earlier check
 was clean. For mutations, keep a byte-preserving pristine baseline and make each
 probe in a disposable copy; see [mutation testing](mutation-testing.md).
 
+An alternate-index commit advances HEAD while leaving the ordinary index at its
+previous tree. Before using this technique, preserve the ordinary index and its
+staged changes, and plan their reconciliation against the new HEAD. Recheck for
+intervening staging immediately before reconciliation; if it changed, stop and
+preserve both versions. Replace the ordinary index with the committed tree only
+when it had no unrelated staged changes and that guard still passes. Otherwise,
+carry the original staged changes forward deliberately. Do not write working
+files, and inspect the resulting cached diff for unintended reversals or deletions.
+
 ## Choose a scratch form that meets the contract
 
 - A detached worktree at the verified head is convenient when original-repository
