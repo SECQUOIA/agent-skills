@@ -1374,6 +1374,162 @@ class EncounterLedgerTests(unittest.TestCase):
                 self.assertNotIn(url, persisted)
                 self.assertNotIn(f"create-{group}", persisted)
 
+    def test_targeted_job_rerun_and_api_query_strings_pair_with_run_and_job_reads(self):
+        job_view = ledger.classify_gh_operations(
+            "gh run view --repo owner/repo --job 200", "/tmp"
+        )[0]
+        job_logs = ledger.classify_gh_operations(
+            "gh api repos/owner/repo/actions/jobs/200/logs", "/tmp"
+        )[0]
+        job_rerun = ledger.classify_gh_operations(
+            "gh run rerun --repo owner/repo --job 200", "/tmp"
+        )[0]
+        other_job = ledger.classify_gh_operations(
+            "gh run view --repo owner/repo --job 201", "/tmp"
+        )[0]
+        run_jobs_query = ledger.classify_gh_operations(
+            'gh api "repos/owner/repo/actions/runs/100/jobs?filter=latest"', "/tmp"
+        )[0]
+        run_view = ledger.classify_gh_operations(
+            "gh run view 100 --repo owner/repo", "/tmp"
+        )[0]
+        dynamic_query = ledger.classify_gh_operations(
+            'gh api "repos/owner/repo/contents/README.md?ref=$BRANCH"', "/tmp"
+        )[0]
+        glob_path = ledger.classify_gh_operations(
+            "gh api repos/owner/repo/pull?/11", "/tmp"
+        )[0]
+
+        self.assertTrue(job_view.read_eligible)
+        self.assertTrue(job_logs.read_eligible)
+        self.assertTrue(run_jobs_query.read_eligible)
+        self.assertFalse(dynamic_query.read_eligible)
+        self.assertFalse(glob_path.read_eligible)
+        self.assertEqual(job_view.workflow_key, job_rerun.workflow_key)
+        self.assertEqual(job_logs.workflow_key, job_rerun.workflow_key)
+        self.assertNotEqual(other_job.workflow_key, job_rerun.workflow_key)
+        self.assertEqual(run_jobs_query.workflow_key, run_view.workflow_key)
+
+        # Other job or run list must not preflight a targeted job rerun.
+        reject_state = str(Path(self.state_dir) / "job-rerun-reject")
+        for non_matching_read in (
+            "gh run list --repo owner/repo",
+            "gh run view --repo owner/repo --job 201",
+        ):
+            ledger.run_hook(
+                hook_payload("PostToolUse", non_matching_read, {"exit_code": 0}),
+                agent="codex",
+                mode="enforce",
+                explicit_state_dir=reject_state,
+            )
+        denied = ledger.run_hook(
+            hook_payload("PreToolUse", "gh run rerun --repo owner/repo --job 200"),
+            agent="codex",
+            mode="enforce",
+            explicit_state_dir=reject_state,
+        )
+        self.assertEqual(
+            denied["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+
+        # Prescribed workflow: inspect run or job logs, rerun --job <id>, then
+        # read back latest jobs on the run (`jobs?filter=latest`) or the job.
+        pass_state = str(Path(self.state_dir) / "job-rerun-pass")
+        for command in (
+            "gh api repos/owner/repo/actions/jobs/200/logs",
+            "gh run rerun --repo owner/repo --job 200",
+            'gh api "repos/owner/repo/actions/runs/100/jobs?filter=latest"',
+        ):
+            if "rerun" in command:
+                self.assertIsNone(
+                    ledger.run_hook(
+                        hook_payload("PreToolUse", command),
+                        agent="codex",
+                        mode="enforce",
+                        explicit_state_dir=pass_state,
+                    )
+                )
+            ledger.run_hook(
+                hook_payload("PostToolUse", command, {"exit_code": 0}),
+                agent="codex",
+                mode="enforce",
+                explicit_state_dir=pass_state,
+            )
+        self.assertEqual(
+            ledger.run_hook(
+                hook_payload("Stop"),
+                agent="codex",
+                mode="enforce",
+                explicit_state_dir=pass_state,
+            ),
+            {},
+        )
+
+    def test_api_issue_and_pull_creation_pair_with_list_preflight_and_numbered_readback(
+        self,
+    ):
+        cases = (
+            (
+                "issue",
+                "gh issue list --repo owner/repo --limit 20",
+                "gh api repos/owner/repo/issues -f title=Bug -f body=Details",
+                '{"number": 27, "html_url": "https://github.com/owner/repo/issues/27"}',
+                "gh api repos/owner/repo/issues/27",
+            ),
+            (
+                "pr",
+                'gh api "repos/owner/repo/pulls?state=open&per_page=20"',
+                "gh api repos/owner/repo/pulls -f title=Fix -f head=feat -f base=main",
+                '{"number": 19}',
+                "gh pr view 19 --repo owner/repo --json state",
+            ),
+        )
+        for group, listing, create, output, readback in cases:
+            with self.subTest(group=group):
+                state_dir = str(Path(self.state_dir) / f"api-create-{group}")
+                ledger.run_hook(
+                    hook_payload("PostToolUse", listing, {"exit_code": 0}),
+                    agent="codex",
+                    mode="enforce",
+                    explicit_state_dir=state_dir,
+                )
+                self.assertIsNone(
+                    ledger.run_hook(
+                        hook_payload(
+                            "PreToolUse", create, tool_use_id=f"api-create-{group}"
+                        ),
+                        agent="codex",
+                        mode="enforce",
+                        explicit_state_dir=state_dir,
+                    )
+                )
+                ledger.run_hook(
+                    hook_payload(
+                        "PostToolUse",
+                        create,
+                        {"exit_code": 0, "output": output},
+                        tool_use_id=f"api-create-{group}",
+                    ),
+                    agent="codex",
+                    mode="enforce",
+                    explicit_state_dir=state_dir,
+                )
+                ledger.run_hook(
+                    hook_payload("PostToolUse", readback, {"exit_code": 0}),
+                    agent="codex",
+                    mode="enforce",
+                    explicit_state_dir=state_dir,
+                )
+                self.assertEqual(
+                    ledger.run_hook(
+                        hook_payload("Stop"),
+                        agent="codex",
+                        mode="enforce",
+                        explicit_state_dir=state_dir,
+                    ),
+                    {},
+                )
+
     def test_create_output_must_identify_one_matching_target(self):
         listing = "gh pr list --repo owner/repo --limit 20"
         create = "gh pr create --repo owner/repo --title created"

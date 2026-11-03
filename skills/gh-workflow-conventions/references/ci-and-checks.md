@@ -104,7 +104,7 @@ Before rerunning a failed matrix, inspect `fail-fast` and distinguish failed job
 from siblings cancelled before completing verification. If an unchanged
 reproducible failure would be included in `--failed`, prefer an authorized
 targeted rerun of cancelled jobs using
-`gh run rerun <run-id> --repo OWNER/REPO --job <databaseId>`, checking the
+`gh run rerun --repo OWNER/REPO --job <databaseId>`, checking the
 dependency scope, or report the remaining coverage gap. Preserve the original
 failure in the handoff; recovered sibling coverage does not make the workflow green.
 
