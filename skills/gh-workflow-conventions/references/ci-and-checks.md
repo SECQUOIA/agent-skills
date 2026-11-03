@@ -49,7 +49,12 @@ changes.
 
 Use bounded watches/polls within the client's per-command duration. Inspect
 current state after a harness timeout; it does not prove the run is stuck. Switch
-from noisy watch output to compact run/job polling when useful. Keep queued jobs
+from noisy watch output to compact run/job polling when useful. Run a poll's status
+query once in the foreground before looping or backgrounding it, and make the loop
+stop and report when the query fails or returns nothing parseable. Discarding its
+stderr into a loop condition turns an unsupported flag (`gh pr checks --json` on
+older `gh`) into an endless "pending"; `gh pr view --json statusCheckRollup` or the
+check-runs API is a portable query. Keep queued jobs
 with no runner, external statuses, and zero-run integration suites distinct.
 An inert suite is not code CI: establish whether a code producer or required
 context should exist before classifying absence. Missing steps in an in-progress
