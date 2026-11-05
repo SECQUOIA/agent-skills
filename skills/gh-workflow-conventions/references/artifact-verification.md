@@ -51,6 +51,19 @@ the installed artifact. Report the runtimes actually checked and any gaps before
 publishing or claiming release readiness. Prefer a project CI guard for this
 contract when packaging is the defect being fixed.
 
+## Manuscript submission archives
+
+For manuscript source uploads, extract each delivered archive outside the checkout
+and build through the receiving service's expected master-file selection. For
+multiple variants, verify that this selects the intended paper and that required
+includes, bibliography files, and external-reference inputs are present. Check
+supplied bibliography names and paths against what each consuming document/build
+actually reads. Retain intended supplementary documents while keeping
+primary-document selection unambiguous.
+Compare the consumer-built PDF with the delivered target at the stated equality
+layer. Compiling a hand-selected repository wrapper alone does not establish
+upload readiness; disclose any receiving-service behavior that remains untested.
+
 ## Frozen research snapshots
 
 Resolve whether a requested paper freeze means protecting a source/data snapshot
