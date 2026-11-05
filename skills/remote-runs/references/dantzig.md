@@ -41,6 +41,16 @@ before starting participating projects; do not create a fresh namespace per run.
 The helper's availability in the skill does not establish that a host-wide
 namespace has been provisioned or adopted by other users.
 
+Before provisioning a new account-local deployment, check the requesting
+account's `~/.config/secquoia-remote-runs/host.json` when present. A deployment
+profile records the common namespace, pinned helper/probe hashes, capable helper
+interpreter, aggregate memory accounting budget and execution/persistence mode.
+Verify that binding and the live namespace instead of inventing a new per-project
+state directory. Its presence establishes neither adoption by other accounts nor
+exclusive host allocation. Keep account-specific absolute paths and raw host/run
+records private; resolve them from the current account rather than copying them
+from another project's deployment.
+
 A later implementation check on 2026-11-05 found system `/usr/bin/python3` at
 3.9.25 with both `os.pidfd_open` and `signal.pidfd_send_signal`. The inspected
 account's Python 3.11.14 build lacked both APIs. Use the verified system
