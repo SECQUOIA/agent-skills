@@ -1504,5 +1504,184 @@
         }
       }
     ]
+  },
+  {
+    "id": "c051",
+    "request": "Check my QUBO run on Dantzig. If it finished, retrieve its results and tell me whether the full return package is verified. The last update said it was waiting for 16 workers.",
+    "observations": [
+      {
+        "source": "run manifest",
+        "content": {
+          "run_id": "q-77",
+          "workers": 16,
+          "threads_per_worker": 1,
+          "timing_regime": "shared-host throughput",
+          "expected_cases": [
+            "a",
+            "b"
+          ]
+        }
+      },
+      {
+        "source": "older progress receipt",
+        "content": {
+          "state": "waiting_for_capacity",
+          "utc": "2026-11-05T10:00:00Z"
+        }
+      },
+      {
+        "source": "current terminal and process receipts",
+        "content": {
+          "utc": "2026-11-05T16:20:00Z",
+          "state": "completed",
+          "controller_exited": true,
+          "process_groups_empty": true,
+          "process_exit": 0,
+          "audit": "passed",
+          "case_results": [
+            {
+              "case": "a",
+              "process_exit": 0,
+              "solver_status": "optimal"
+            },
+            {
+              "case": "b",
+              "process_exit": 0,
+              "solver_status": "time_limit",
+              "valid_incumbent": true
+            }
+          ]
+        }
+      },
+      {
+        "source": "return manifest and extraction verification",
+        "content": {
+          "returned_summary_hash": "matches",
+          "returned_raw_case_logs": false,
+          "input_payloads": "path/size/hash inventory only",
+          "frozen_auditor_included": false,
+          "solver_scratch": "excluded"
+        }
+      }
+    ]
+  },
+  {
+    "id": "c052",
+    "request": "Cancel my Dantzig run r-42. It seems stuck. Leave its partial results for later.",
+    "observations": [
+      {
+        "source": "recorded run identity",
+        "content": {
+          "run_id": "r-42",
+          "owner": "researcher",
+          "boot_id": "boot-b",
+          "controller": {
+            "pid": 5100,
+            "pgid": 5100,
+            "start_ticks": 123456
+          },
+          "detached_worker": {
+            "pid": 5101,
+            "pgid": 5101,
+            "start_ticks": 123459
+          },
+          "cwd": "/project/runs/r-42",
+          "stop_entrypoint": null
+        }
+      },
+      {
+        "source": "current host process receipts",
+        "content": {
+          "boot_id": "boot-b",
+          "processes": [
+            {
+              "pid": 5100,
+              "pgid": 5100,
+              "start_ticks": 999999,
+              "owner": "researcher",
+              "cwd": "/project/runs/r-99",
+              "command": "python train.py"
+            },
+            {
+              "pid": 5101,
+              "pgid": 5101,
+              "start_ticks": 123459,
+              "owner": "researcher",
+              "cwd": "/project/runs/r-42",
+              "command": "python worker.py --run r-42"
+            }
+          ],
+          "session_and_full_group_membership": "not yet inspected",
+          "partial_results_present": true,
+          "r42_terminal_receipt": null
+        }
+      }
+    ]
+  },
+  {
+    "id": "c053",
+    "request": "Prepare a controlled CPU timing run on Dantzig with four one-thread workers. Do not launch it yet.",
+    "observations": [
+      {
+        "source": "project run specification",
+        "content": {
+          "workers": 4,
+          "native_threads_per_worker": 1,
+          "seeds": [
+            101,
+            202,
+            303
+          ],
+          "memory_requirement": "not measured",
+          "timing_regime": "otherwise idle physical cores"
+        }
+      },
+      {
+        "source": "host inspection",
+        "content": {
+          "physical_cores": 48,
+          "logical_cpus": 96,
+          "allowed_logical_cpus": "0-7",
+          "smt_siblings": "i and i+48",
+          "per_cpu_sample": {
+            "0-7": "idle",
+            "48-55": "busy"
+          },
+          "scheduler_commands": "not found in PATH",
+          "load_average": 8.0
+        }
+      },
+      {
+        "source": "existing launcher",
+        "content": "Uses a checkout-local duplicate-controller flock and taskset; no common cross-project allocation protocol is configured."
+      }
+    ]
+  },
+  {
+    "id": "c054",
+    "request": "Launch these two projects on Dantzig so they cannot overlap on physical CPU cores. Each must use four one-thread workers.",
+    "observations": [
+      {
+        "source": "host resource inspection",
+        "content": {
+          "scheduler": "not available to the account",
+          "physical_cores": 48,
+          "allowed_cpus": "0-95",
+          "per_core_activity": "idle at the latest sample"
+        }
+      },
+      {
+        "source": "project A launcher",
+        "content": "Pins workers to logical CPUs 0-3. Its duplicate guard is /project-a/results/controller.lock."
+      },
+      {
+        "source": "project B launcher",
+        "content": "Pins workers to logical CPUs 0-3. Its duplicate guard is /project-b/results/controller.lock."
+      },
+      {
+        "source": "common admission protocol",
+        "content": "No shared CPU allocator or lock namespace has been configured. Both clients could pass the current idleness check simultaneously. Other users can start jobs outside these project harnesses."
+      }
+    ]
   }
 ]

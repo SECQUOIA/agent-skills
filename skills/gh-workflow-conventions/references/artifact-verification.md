@@ -12,6 +12,13 @@ mtimes can cause `make`/`latexmk` to declare committed targets up to date. Confi
 actually wrote the output. A generator with missing inputs should fail before
 clobbering a committed artifact with empty/placeholder content.
 
+For generators that recursively replace an output directory, validate the resolved
+deletion target before any cleanup, including symlink aliases. Reject
+repository/source roots and targets containing required inputs; establish that the
+resolved directory is disposable task-owned output rather than trusting its
+conventional name. Complete required-input checks before removal so failed
+preflight preserves the previous artifact.
+
 If a check archives `HEAD`, its pass covers that commit, not uncommitted candidate
 artifacts. Use a scratch candidate commit or materialized candidate tree. Recheck
 only after relevant artifact/source changes. For cross-platform numeric last-bit
@@ -44,6 +51,19 @@ the installed artifact. Report the runtimes actually checked and any gaps before
 publishing or claiming release readiness. Prefer a project CI guard for this
 contract when packaging is the defect being fixed.
 
+## Manuscript submission archives
+
+For manuscript source uploads, extract each delivered archive outside the checkout
+and build through the receiving service's expected master-file selection. For
+multiple variants, verify that this selects the intended paper and that required
+includes, bibliography files, and external-reference inputs are present. Check
+supplied bibliography names and paths against what each consuming document/build
+actually reads. Retain intended supplementary documents while keeping
+primary-document selection unambiguous.
+Compare the consumer-built PDF with the delivered target at the stated equality
+layer. Compiling a hand-selected repository wrapper alone does not establish
+upload readiness; disclose any receiving-service behavior that remains untested.
+
 ## Frozen research snapshots
 
 Resolve whether a requested paper freeze means protecting a source/data snapshot
@@ -53,12 +73,27 @@ are supplied. If the exact paper-producing revision or environment is unrecorded
 disclose that gap rather than labeling a plausible historical checkout as the
 verified producing revision.
 
-Before publishing an immutable release, prepare all intended assets in a draft
-and verify its target commit and uploaded asset digests against the validated
-artifacts. Publish within the authorized scope, then read back server-side
-immutability and intended tag protections before claiming a protected snapshot;
-a tag or "frozen" label alone establishes neither. Correct immutable artifacts
-through a new version rather than silently relabeling their provenance.
+When copied configuration or dependency manifests are evidence rather than
+active project inputs, store them under inert filenames or an archive wrapper
+so repository scanners do not evaluate historical data as live configuration.
+Preserve the original bytes, logical filenames and digests through an explicit
+storage map, and verify the reconstructed original inventory. Keep real manifests
+scanner-visible; do not rewrite frozen evidence or disable live checks to make
+the evidence package pass.
+
+Before publishing an immutable release, verify the live immutability policy that
+will apply to this publication; an older immutable release does not establish
+the current policy. Prepare all intended assets in a draft and verify its target
+commit and uploaded asset digests against the validated artifacts. If the promised
+protections are disabled, establish an authorized way to activate them for first
+publication; do not publish mutable assets with a plan to lock them later.
+
+Publish within the authorized scope, then read back server-side immutability and
+intended tag protections before claiming a protected snapshot. When a temporary
+policy change is authorized, record its prior state before changing it and restore
+it after publication; verify the new release remains protected after restoration.
+A tag or "frozen" label alone establishes neither protection. Correct immutable
+artifacts through a new version rather than silently relabeling their provenance.
 
 ## Rendered contracts
 

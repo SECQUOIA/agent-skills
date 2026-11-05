@@ -126,6 +126,7 @@ TARGETED_ACTIONS = {
 IGNORED_GROUPS = {
     "--help",
     "--version",
+    "-h",
     "alias",
     "auth",
     "completion",
@@ -167,20 +168,27 @@ GH_VALUE_FLAGS = FLAGS_WITH_VALUES | {
     "--assignee",
     "--attempt",
     "--author",
+    "--author-email",
     "--base",
     "--branch",
     "--category",
     "--color",
+    "--comment",
+    "--description",
     "--discussion-category",
     "--head",
+    "--homepage",
     "--interval",
     "--job",
     "--json",
     "--label",
     "--limit",
+    "--match-head-commit",
     "--milestone",
+    "--name",
     "--notes",
     "--notes-file",
+    "--notes-start-tag",
     "--output",
     "--pattern",
     "--project",
@@ -195,6 +203,8 @@ GH_VALUE_FLAGS = FLAGS_WITH_VALUES | {
     "--state",
     "--subject",
     "--tag",
+    "--target",
+    "--visibility",
     "-A",
     "-B",
     "-L",
@@ -215,11 +225,28 @@ GH_VALUE_FLAGS = FLAGS_WITH_VALUES | {
 GH_ACTION_BOOLEAN_FLAGS = {
     ("pr", "checkout"): {"-f"},
     ("pr", "merge"): {"-m", "-s"},
-    ("pr", "review"): {"-a"},
+    ("pr", "review"): {"-a", "--comment"},
+    ("repo", "edit"): {"--template"},
+    ("secret", "delete"): {"--user"},
+    ("secret", "list"): {"--user"},
+    ("secret", "set"): {"--user"},
+    ("workflow", "run"): {"--json"},
 }
 GH_ACTION_VALUE_FLAGS = {
+    ("issue", "close"): {"-c", "-r"},
     ("issue", "edit"): {"-m"},
+    ("issue", "lock"): {"-r"},
+    ("issue", "reopen"): {"-c"},
+    ("label", "create"): {"-c", "-d"},
+    ("label", "edit"): {"-c", "-d"},
+    ("pr", "close"): {"-c"},
     ("pr", "edit"): {"-m"},
+    ("pr", "lock"): {"-r"},
+    ("pr", "reopen"): {"-c"},
+    ("repo", "create"): {"-d", "-h"},
+    ("repo", "edit"): {"-d", "-h"},
+    ("run", "rerun"): {"-j"},
+    ("run", "view"): {"-j"},
 }
 
 
@@ -2496,6 +2523,19 @@ def _dynamic_shell_value(value: str | None) -> bool:
     return bool(re.search(r"\$|`|<\(|>\(|[*?\[]", value))
 
 
+def _dynamic_api_endpoint(endpoint: str | None) -> bool:
+    if not endpoint:
+        return False
+    path_part, sep, query_part = endpoint.partition("?")
+    if _dynamic_shell_value(path_part):
+        return True
+    if not sep:
+        return False
+    if not re.match(r"[A-Za-z0-9_.-]+=", query_part):
+        return True
+    return bool(re.search(r"\$|`|<\(|>\(|[*?\[]", query_part))
+
+
 def _graphql_input_document(
     tokens: list[str], cwd: str | None
 ) -> tuple[dict[str, Any] | None, bool]:
@@ -2881,15 +2921,40 @@ def _graphql_target(
     return repo, f"graphql:{_target_digest(scope)}", f"{repo}:graphql"
 
 
-def _positional_candidates(tokens: list[str], group: str, action: str) -> list[str]:
-    candidates: list[str] = []
+def _gh_value_flags(group: str, action: str) -> set[str]:
     boolean_flags = GH_ACTION_BOOLEAN_FLAGS.get((group, action), set())
-    value_flags = (
+    return (
         GH_VALUE_FLAGS | GH_ACTION_VALUE_FLAGS.get((group, action), set())
     ) - boolean_flags
+
+
+def _is_gh_help_request(tokens: list[str], group: str, action: str) -> bool:
+    if group in IGNORED_GROUPS:
+        return True
+    value_flags = _gh_value_flags(group, action)
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            return False
+        if token in value_flags:
+            index += 2
+            continue
+        if token in {"--help", "-h"} or token.startswith("--help="):
+            return True
+        index += 1
+    return False
+
+
+def _positional_candidates(tokens: list[str], group: str, action: str) -> list[str]:
+    candidates: list[str] = []
+    value_flags = _gh_value_flags(group, action)
     index = 3
     while index < len(tokens):
         token = tokens[index]
+        if token == "--":
+            candidates.extend(tokens[index + 1 :])
+            break
         if token in value_flags:
             index += 2
             continue
@@ -2904,6 +2969,10 @@ def _positional_candidates(tokens: list[str], group: str, action: str) -> list[s
 def _immediate_target(tokens: list[str], group: str, action: str) -> str | None:
     if action not in TARGETED_ACTIONS.get(group, set()):
         return None
+    if group == "run" and action in {"view", "rerun"}:
+        job_target = _flag_value(tokens, "--job", "-j")
+        if job_target:
+            return f"job:{job_target}"
     candidates = _positional_candidates(tokens, group, action)
     for candidate in candidates:
         if re.search(r"https?://", candidate):
@@ -2924,7 +2993,7 @@ def _operation_has_dynamic_scope(tokens: list[str]) -> bool:
     group = tokens[1] if len(tokens) > 1 else "unknown"
     action = tokens[2] if len(tokens) > 2 else ""
     if group == "api":
-        if _dynamic_shell_value(_api_endpoint(tokens)):
+        if _dynamic_api_endpoint(_api_endpoint(tokens)):
             return True
         if _api_endpoint(tokens) == "graphql":
             target_fields = _graphql_fields(tokens)
@@ -2953,7 +3022,7 @@ def _has_explicit_repository_scope(tokens: list[str], cwd: str | None) -> bool:
     group = tokens[1] if len(tokens) > 1 else "unknown"
     action = tokens[2] if len(tokens) > 2 else ""
     if group == "api":
-        endpoint = _api_endpoint(tokens)
+        endpoint = _api_endpoint(tokens).split("?", 1)[0]
         if re.search(r"(?:^|/)repos/[^/$`{}:]+/[^/$`{}:]+(?:/|$)", endpoint):
             return True
         if endpoint == "graphql":
@@ -2980,7 +3049,9 @@ def _has_explicit_repository_scope(tokens: list[str], cwd: str | None) -> bool:
     )
 
 
-def _repo_and_target(tokens: list[str], cwd: str | None) -> tuple[str, str, str]:
+def _repo_and_target(
+    tokens: list[str], cwd: str | None, *, kind: str = "unknown"
+) -> tuple[str, str, str]:
     explicit_repo = _flag_value(tokens, "--repo", "-R")
     if _dynamic_shell_value(explicit_repo):
         return (
@@ -2994,17 +3065,20 @@ def _repo_and_target(tokens: list[str], cwd: str | None) -> tuple[str, str, str]
 
     if group == "api":
         endpoint = _api_endpoint(tokens)
-        if _dynamic_shell_value(endpoint):
+        if _dynamic_api_endpoint(endpoint):
             return repo, "dynamic:api", f"{repo}:dynamic API target"
         if endpoint == "graphql":
             return _graphql_target(tokens, cwd, repo)
-        match = re.search(r"repos/([^/]+/[^/]+)/(pulls|issues)/(\d+)", endpoint)
+        normalized_endpoint = endpoint.split("?", 1)[0].strip("/") or "unknown"
+        match = re.search(
+            r"repos/([^/]+/[^/]+)/(pulls|issues)/(\d+)", normalized_endpoint
+        )
         if match:
             repo, resource, number = match.groups()
             object_kind = "pull" if resource == "pulls" else "issue-or-pull"
             return repo, f"{object_kind}:number:{number}", f"{repo}#{number}"
         comment_match = re.search(
-            r"repos/([^/]+/[^/]+)/(pulls|issues)/comments/(\d+)", endpoint
+            r"repos/([^/]+/[^/]+)/(pulls|issues)/comments/(\d+)", normalized_endpoint
         )
         if comment_match:
             repo, resource, comment_id = comment_match.groups()
@@ -3014,10 +3088,36 @@ def _repo_and_target(tokens: list[str], cwd: str | None) -> tuple[str, str, str]
                 f"{comment_kind}-comment:id:{comment_id}",
                 f"{repo}:{resource}/comments/{comment_id}",
             )
-        repo_match = re.search(r"repos/([^/]+/[^/]+)", endpoint)
+        job_match = re.search(
+            r"(?:^|/)repos/([^/]+/[^/]+)/actions/jobs/(\d+)(?:/(?:logs|rerun))?$",
+            normalized_endpoint,
+        )
+        if job_match:
+            repo, job_id = job_match.groups()
+            return repo, f"run:job:{_target_digest(job_id)}", f"{repo}:run:job:{job_id}"
+        run_match = re.search(
+            r"(?:^|/)repos/([^/]+/[^/]+)/actions/runs/(\d+)"
+            r"(?:/(?:approvals|attempts/\d+(?:/(?:jobs|logs))?|cancel|force-cancel|jobs|logs|pending_deployments|rerun|rerun-failed-jobs|timing))?$",
+            normalized_endpoint,
+        )
+        if run_match:
+            repo, run_id = run_match.groups()
+            return repo, f"run:{_target_digest(run_id)}", f"{repo}:run:{run_id}"
+        collection_match = re.search(
+            r"(?:^|/)repos/([^/]+/[^/]+)/(pulls|issues)$", normalized_endpoint
+        )
+        if collection_match and kind in {"read", "write"}:
+            repo, resource = collection_match.groups()
+            collection_group = "pr" if resource == "pulls" else "issue"
+            collection_action = "list" if kind == "read" else "create"
+            return (
+                repo,
+                f"{collection_group}:{collection_action}",
+                f"{repo}:{collection_group}:{collection_action}",
+            )
+        repo_match = re.search(r"repos/([^/]+/[^/]+)", normalized_endpoint)
         if repo_match:
             repo = repo_match.group(1)
-        normalized_endpoint = endpoint.split("?", 1)[0].strip("/") or "unknown"
         category_match = re.search(r"repos/[^/]+/[^/]+/([^/]+)", normalized_endpoint)
         category = category_match.group(1) if category_match else "api"
         return (
@@ -3032,6 +3132,9 @@ def _repo_and_target(tokens: list[str], cwd: str | None) -> tuple[str, str, str]
     if group == "repo" and target and "/" in target:
         repo = _normalize_repo(target)
         return repo, "repo", f"{repo}:repo"
+    if target and group == "run" and target.startswith("job:"):
+        job_id = target.removeprefix("job:")
+        return repo, f"run:job:{_target_digest(job_id)}", f"{repo}:run:job:{job_id}"
     if target and group in {"pr", "issue"}:
         url_match = re.search(r"github\.com/([^/]+/[^/]+)/(pull|issues)/(\d+)", target)
         if url_match:
@@ -3067,6 +3170,10 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
     ):
         if len(tokens) < 2:
             continue
+        group = tokens[1]
+        action = tokens[2] if len(tokens) > 2 else ""
+        if _is_gh_help_request(tokens, group, action):
+            continue
         operation_cwd = context.working_directory
         if (
             context.repository_scope_changed
@@ -3074,10 +3181,6 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
             and not _has_explicit_repository_scope(tokens, operation_cwd)
         ):
             tokens = [*tokens, "--repo", WRAPPER_CWD_SENTINEL]
-        group = tokens[1]
-        action = tokens[2] if len(tokens) > 2 else ""
-        if group in IGNORED_GROUPS:
-            continue
         if group == "api":
             kind = _api_kind(tokens, operation_cwd)
         elif group == "repo" and action == "set-default" and "--view" in tokens[3:]:
@@ -3091,7 +3194,7 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
         else:
             kind = "unknown"
         dynamic_scope = _operation_has_dynamic_scope(tokens)
-        repo, target, label = _repo_and_target(tokens, operation_cwd)
+        repo, target, label = _repo_and_target(tokens, operation_cwd, kind=kind)
         hostname = _flag_value(tokens, "--hostname") or os.environ.get(
             "GH_HOST", "github.com"
         )
@@ -3177,8 +3280,11 @@ def _created_comment_readback_keys(
 def _creation_group(operation: GhOperation) -> str | None:
     for group in ("pr", "issue"):
         if (
-            operation.summary == f"gh {group} create"
-            and operation.workflow_key == f"{operation.repo_key}:{group}:create"
+            operation.workflow_key == f"{operation.repo_key}:{group}:create"
+            and (
+                operation.summary == f"gh {group} create"
+                or operation.summary.startswith("gh api")
+            )
         ):
             return group
     return None
@@ -3187,8 +3293,9 @@ def _creation_group(operation: GhOperation) -> str | None:
 def _creation_preflight(read: GhOperation) -> GhOperation | None:
     for group in ("pr", "issue"):
         suffix = f":{group}:list"
-        if read.summary != f"gh {group} list" or not read.workflow_label.endswith(
-            suffix
+        if (
+            read.workflow_key != f"{read.repo_key}:{group}:list"
+            or not read.workflow_label.endswith(suffix)
         ):
             continue
         return GhOperation(
@@ -3238,6 +3345,8 @@ def _created_target_from_response(
     if _dynamic_shell_value(host) or _dynamic_shell_value(repo) or "/" not in repo:
         return None
 
+    expected_resource = "pull" if group == "pr" else "issues"
+    expected_owner, expected_name = repo.lower().split("/", 1)
     text = _bounded_tool_response_text(payload).replace("\\/", "/")
     urls = {
         (url_host.lower(), owner.lower(), name.lower(), resource.lower(), number)
@@ -3248,16 +3357,41 @@ def _created_target_from_response(
             flags=re.I,
         )
     }
-    if len(urls) != 1:
-        return None
-    url_host, owner, name, resource, number = next(iter(urls))
-    expected_resource = "pull" if group == "pr" else "issues"
-    expected_owner, expected_name = repo.lower().split("/", 1)
-    if (
-        url_host != host.lower()
-        or (owner, name) != (expected_owner, expected_name)
-        or resource != expected_resource
-    ):
+    number = ""
+    if len(urls) == 1:
+        url_host, owner, name, resource, candidate_number = next(iter(urls))
+        if (
+            url_host == host.lower()
+            and (owner, name) == (expected_owner, expected_name)
+            and resource == expected_resource
+        ):
+            number = candidate_number
+    elif not urls and operation.summary.startswith("gh api"):
+        expected_api_resource = "pulls" if group == "pr" else "issues"
+        api_urls = {
+            (url_host.lower(), owner.lower(), name.lower(), candidate_number)
+            for url_host, owner, name, resource, candidate_number in re.findall(
+                r"https?://api\.([^/\s\"'<>]+)/repos/([^/\s\"'<>]+)/([^/\s\"'<>]+)"
+                r"/(pulls|issues)/(\d+)(?=$|[/?#\s\"'<>])",
+                text,
+                flags=re.I,
+            )
+            if resource.lower() == expected_api_resource
+        }
+        if len(api_urls) == 1:
+            url_host, owner, name, candidate_number = next(iter(api_urls))
+            if url_host == host.lower() and (owner, name) == (
+                expected_owner,
+                expected_name,
+            ):
+                number = candidate_number
+        else:
+            numbers = set(re.findall(r'"number"\s*:\s*(\d+)', text))
+            if len(numbers) == 1:
+                number = next(iter(numbers))
+            elif re.fullmatch(r"\s*\d+\s*", text or " "):
+                number = text.strip()
+    if not number:
         return None
     object_kind = "pull" if group == "pr" else "issue"
     return GhOperation(
@@ -3272,6 +3406,8 @@ def _created_target_from_response(
 _NUMBERED_TARGET_KEY = re.compile(
     r"^(?P<prefix>.*):(?P<kind>pull|issue|issue-or-pull):number:(?P<number>\d+)$"
 )
+_JOB_RUN_KEY = re.compile(r"^(?P<prefix>github:[^:]+:[^:]+):run:job:[0-9a-f]{20}$")
+_CONCRETE_RUN_KEY = re.compile(r"^(?P<prefix>github:[^:]+:[^:]+):run:[0-9a-f]{20}$")
 
 
 def _equivalent_workflow_keys(workflow_key: str) -> tuple[str, ...]:
@@ -3307,6 +3443,19 @@ def _preflight_seen(
     for key in _equivalent_workflow_keys(workflow_key):
         row = _activity(connection, session_id, turn_id, key)
         if row is not None and row["preflight_seen"]:
+            return True
+    job_match = _JOB_RUN_KEY.match(workflow_key)
+    if job_match is not None:
+        prefix = job_match.group("prefix")
+        rows = connection.execute(
+            """
+            SELECT workflow_key FROM hook_activity
+            WHERE session_id = ? AND turn_id = ? AND repo_key = ?
+              AND preflight_seen = 1
+            """,
+            (session_id, turn_id, prefix),
+        ).fetchall()
+        if any(_CONCRETE_RUN_KEY.match(str(row["workflow_key"])) for row in rows):
             return True
     return False
 
@@ -4207,10 +4356,21 @@ def _post_tool_use(
                     )
 
         for pending in pending_before:
-            accepted_keys = set(_equivalent_workflow_keys(str(pending["workflow_key"])))
+            pending_key = str(pending["workflow_key"])
+            accepted_keys = set(_equivalent_workflow_keys(pending_key))
             accepted_keys.update(str(pending["readback_keys"] or "").split())
+            job_match = _JOB_RUN_KEY.match(pending_key)
             matching_read = next(
-                (read for read in reads if read.workflow_key in accepted_keys),
+                (
+                    read
+                    for read in reads
+                    if read.workflow_key in accepted_keys
+                    or (
+                        job_match is not None
+                        and read.repo_key == job_match.group("prefix")
+                        and _CONCRETE_RUN_KEY.match(read.workflow_key) is not None
+                    )
+                ),
                 None,
             )
             if matching_read:

@@ -54,6 +54,17 @@ the symptom; do not install a browser for an unrelated deployment check.
 
 ## Make the authorized change
 
+Before enabling a site or changing publication exposure from a private/internal
+repository, establish the intended site audience separately from repository
+visibility: a Pages site can be public even when its source is private. Verify
+site access controls against that audience using the current
+[Pages visibility documentation](https://docs.github.com/en/enterprise-cloud%40latest/pages/getting-started-with-github-pages/changing-the-visibility-of-your-github-pages-site).
+Preserve repository visibility unless changing it is authorized, and inspect the
+exact publishing folder/artifact using
+[private-input hygiene](../gh-workflow-conventions/references/change-hygiene.md).
+Site-publication authority does not automatically include unrelated private inputs
+or repository history.
+
 For a rejected branch push (`fetch first` or non-fast-forward), refresh the run
 attempt, PR head, and destination tip. Inspect every writer to that destination:
 preview and main/tag/manual publishers, cleanup/history jobs, and aggregation.

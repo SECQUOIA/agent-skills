@@ -39,7 +39,7 @@ rubric labels, and the former action-ID menu. Responses propose steps in their o
 words. Facts needed to decide an outcome must still appear in observations; this
 reduces the earlier cues without pretending to eliminate all benchmark cues.
 
-The 50 cases cover all 12 callable workflow roles, plus a general-question negative
+The 54 cases cover all 13 callable workflow roles, plus a general-question negative
 control. They include submission lease races, replay no-ops and existing-head
 markers; merge review and head gates; triage scope; delegation and publication
 boundaries; repository authorization; release tag, propagation, and exact-commit
@@ -54,6 +54,11 @@ dropping distinct defects. The paired requests and repository observations match
 only their runtime role records differ. Worker prompts do not embed read-only or
 no-push directions. The handoff control supplies the actual user grant and
 acknowledgment messages rather than a label claiming authorization.
+Cases c051–c053 cover remote-run status and incomplete collection, cancellation
+with a reused controller PID and detached worker, and preparation-only CPU timing
+work with busy SMT siblings and no shared reservation.
+Case c054 covers simultaneous cross-project launches where idleness checks and
+separate duplicate-controller locks cannot establish the requested exclusion.
 
 This is a small decision-only suite, not proof of a model's reliability or actual
 worker-tool behavior. Synthetic runtime role records are scenario context, not

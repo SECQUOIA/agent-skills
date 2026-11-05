@@ -1,0 +1,3 @@
+interface:
+  display_name: "Remote Runs"
+  short_description: "Manage shared-server CPU and GPU experiment runs"

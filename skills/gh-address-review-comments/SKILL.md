@@ -21,7 +21,7 @@ Read paginated GraphQL `reviewThreads` including `isResolved`, nested comments, 
 
 Classify targets as actionable, already addressed, informational/out of scope, incorrect/harmful, or declined Blocking. Without a Blocking-only limit, address safe actionable nonblocking requests too. Preserve severity prefixes; an unprefixed correctness, security, regression, or serious maintainability concern is Blocking. Declining a Blocking item leaves it unresolved for human judgment.
 
-Read [feedback triage](references/feedback-triage.md) when feedback overlaps, prescribes a deferral, concerns metadata/settings, or makes a broad design claim. Map related targets to one coherent acceptance checklist, verify both diagnosis and remedy against current head, then implement the smallest correct solution. A question can expose a defect; an observation explicitly requiring no change is informational.
+Read [feedback triage](references/feedback-triage.md) when feedback overlaps, prescribes a deferral, concerns metadata/settings, claims a prior fix is missing, or makes a broad design claim. Map related targets to one coherent acceptance checklist, verify both diagnosis and remedy against current head, then implement the smallest correct solution. A question can expose a defect; an observation explicitly requiring no change is informational.
 
 If there are no feedback targets, report the empty pass without posting a “nothing to address” comment. If targets exist but all need explanation rather than code, follow the publication path without manufacturing a commit.
 

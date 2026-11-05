@@ -14,6 +14,11 @@ until their integration is verified.
   can leave the index at a different revision than the tested worktree. Review the
   actual cached content before committing. Keep unrelated files and credentials
   out; include intended binary/generated artifacts only after their checks.
+- Keep private task inputs, such as student submissions or correspondence, out of
+  commits and shared artifacts unless publishing them is within the requested
+  scope. A broad "commit everything" instruction alone does not turn private inputs
+  into deliverables. Inspect selected archive contents and generated outputs for
+  embedded private inputs before sharing; preserve local-only source material locally.
 - To undo accidental staging, use `git restore --staged` for previously tracked
   files. `git rm --cached` on them stages a deletion. For newly assembled trees,
   inspect ignored paths too; broad ignores can silently omit required data/evidence.
