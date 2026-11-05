@@ -21,6 +21,7 @@ is the source of truth, with changes reviewed through pull requests.
 | `apply-conversation-lessons` | Make requested, evidence-backed improvements to existing skills |
 | `submit-learnings` | Safely sync and submit a personal learnings branch |
 | `sync-secquoia-skills` | Sync merged skills while preserving pending local learnings |
+| `remote-runs` | Prepare, supervise, recover, and retrieve CPU/GPU experiments on external servers |
 
 See [the issue-to-release pipeline](PIPELINE.md), [contribution workflow](CONTRIBUTING.md),
 and [behavioral evaluation guide](evals/README.md). Install the whole set: sibling
