@@ -1,0 +1,39 @@
+name: Validate skills
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  skills-and-launcher:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare native Python environment
+        run: |
+          /usr/bin/python3 -m venv "$RUNNER_TEMP/secquoia-validation"
+          "$RUNNER_TEMP/secquoia-validation/bin/python" -m pip install -r requirements-dev.txt
+          "$RUNNER_TEMP/secquoia-validation/bin/python" - <<'PYTHON'
+          import os
+          import signal
+          import sys
+          print(sys.version)
+          assert hasattr(os, "fork") and hasattr(os, "sched_getaffinity")
+          assert len(os.sched_getaffinity(0)) >= 2
+          assert hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal")
+          PYTHON
+      - name: Validate skill metadata and references
+        run: |
+          "$RUNNER_TEMP/secquoia-validation/bin/python" -B scripts/validate_skill_metadata.py
+      - name: Run repository and Linux launcher tests
+        run: |
+          "$RUNNER_TEMP/secquoia-validation/bin/python" -B -m unittest discover -s tests
+      - name: Check shell syntax
+        run: bash -n install.sh uninstall.sh
