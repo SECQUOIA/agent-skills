@@ -8,6 +8,8 @@ For a new PR, use the actual repository template and create it draft. Preserve m
 
 Describe the problem, resulting behavior, scope, validation and material limits. Include branch/base/stack details when relevant, linked triage and covered criteria, and concrete dependency/follow-up relationships. Use Closes for fully resolved issues, Refs for partial work with unmet criteria and closure path; state that non-default-base integration may defer automatic closure. A replacement PR should say Supersedes and explain any deliberate behavioral/artifact differences.
 
+Keep new descriptions useful after the current run: state completed validation with its tested revision and material unverified limits. Put transient check/review progress and promised follow-up results in the head-pinned current-state comment above. Keep unmet acceptance criteria and required human review explicit.
+
 For intentionally unexecuted notebooks, state the reason and actual validation. For private/canonical inputs, label pinned aggregate evidence and identify a shareable revision or approved artifact ID; do not claim a public golden check independently recomputes private results. Protect the underlying private source.
 
 After posting, verify exact stored content and links. Author-side COMMENT reviews cannot formally approve the PR; mention the constraint only when it matters to the next step. Keep the PR draft when policy requires human review before engagement, regardless of green CI.
