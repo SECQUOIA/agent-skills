@@ -23,3 +23,13 @@ Validation and deployment evidence are recorded in the implementing commit.
 The apply-conversation-lessons workflow itself is unchanged: its existing
 eligibility, owner selection and local-only submission boundary already cover
 this episode.
+
+During host acceptance, automatic approval review rejected a broad raw-output
+return. Setup verification needed only a strictly allowlisted receipt; that
+safer export completed without returning raw commands, account paths, process
+identities or license data. Retrieval guidance now distinguishes the minimum
+evidence for the requested stage and rejects filename-only privacy inference.
+It preserves existing agreed return authorization rather than adding a universal
+confirmation step. The refusal itself is not evidence that every raw retrieval
+is unauthorized or that the shared GitHub encounter classifiers detected a
+remote-run violation.

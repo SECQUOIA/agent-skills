@@ -124,6 +124,12 @@ before another attempt.
 
 ## Retrieve and hand off
 
+Collect the evidence needed for the requested stage within its authorized return
+scope. Setup checks may need only explicitly allowlisted validation receipts.
+Filename suffixes do not establish privacy: logs and manifests can contain input
+records, commands, account paths or license identifiers. Reuse authorization for
+an agreed payload/destination; do not silently broaden it.
+
 Collect into a fresh local destination after confirming whether the run is
 complete or the transfer is a partial snapshot. Retain raw logs, manifests,
 resource observations, solver outcomes, failures and exit statuses. Verify
