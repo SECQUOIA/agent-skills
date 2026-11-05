@@ -80,6 +80,14 @@ the effort value sent to the API. See
 Antigravity executes commands through `run_command` in a secure sandbox by default.
 Commands requiring external network access (such as `gh` issue/PR interactions or git remote operations) require sandbox network permission or running with elevated permission (`BypassSandbox: true`). Use standard sandbox execution first unless external network access is strictly necessary.
 
+For headless `agy`, inspect startup warnings before treating a requested mode as
+an applied restriction. An observed invocation on 2026-11-05 warned that
+`--mode plan` has no effect with `--disable-slash-commands`; do not count that
+combination as read-only enforcement. Recheck the installed client's behavior
+and retain sandboxing and supported tool or filesystem restrictions when
+enforcement is required. A no-tools prompt or a response reporting no tools does
+not establish which permissions were available.
+
 Subagents in Antigravity are invoked via `invoke_subagent` with explicit parameters:
 - `Model`: `inherit`, `flash_lite`, `flash`, or `pro` (use `pro` for frontier reasoning review and complex verification tasks such as Argon 4 / Gemini 4 Argon, and `flash` / `flash_lite` for bounded triage or research).
 - `Workspace`: `inherit`, `branch` (isolated copy/branch), or `share` (shared git worktree).
