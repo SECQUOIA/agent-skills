@@ -27,6 +27,10 @@ existing launcher, status, stop/resume, and collection procedures. Reuse them
 where they provide the needed guarantees; identify gaps before relying on them.
 Keep authentication material and solver licenses outside packages and logs.
 
+If the harness dispatches work through services or another scheduler, read
+[service-harness integration](references/service-harnesses.md) before placing
+the resource supervisor. Its claim must cover the actual workload descendants.
+
 For Dantzig, read [the host reference](references/dantzig.md). For allocating CPU
 or GPU resources, read [shared-host coordination](references/shared-hosts.md).
 Read [launcher usage and recovery](references/launcher.md) before using or

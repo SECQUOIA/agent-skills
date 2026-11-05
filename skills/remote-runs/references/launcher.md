@@ -51,7 +51,9 @@ security-isolated tenants.
 ## Run a project command
 
 Keep the project's cases, seeds, solver settings, limits and evidence procedures.
-Wrap its actual controller command; do not replace its experiment logic.
+Wrap the process whose actual descendants perform the allocated work. When a
+controller dispatches sibling services, use [service-harness integration](service-harnesses.md)
+to put the helper inside each allocation; do not replace the experiment logic.
 
 ```bash
 "$PYTHON" "$RUNNER" run --state-dir "$STATE" --cores 4 --threads 1 \
