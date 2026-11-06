@@ -51,6 +51,15 @@ the installed artifact. Report the runtimes actually checked and any gaps before
 publishing or claiming release readiness. Prefer a project CI guard for this
 contract when packaging is the defect being fixed.
 
+## Recipient-specific deliveries
+
+Verify personalized output sets against an authoritative recipient-to-record or
+page-range mapping rather than inferring identity from ordering. Check that each
+recipient receives only their intended material and approved common content,
+including embedded or otherwise nonvisible content. Extract final archives and
+check the receiving service's matching filenames and paths; keep staff-only identity
+maps and audit records outside recipient bundles.
+
 ## Manuscript submission archives
 
 For manuscript source uploads, extract each delivered archive outside the checkout
