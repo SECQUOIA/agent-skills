@@ -395,6 +395,9 @@ def reserve(args, path, config, owner, run_id, nonce, cancel):
             raise RunError("admission cancelled before command startup")
         try:
             with admission_gate(path, deadline, cancel=cancel):
+                _, current_config = namespace(path)
+                if current_config != config:
+                    raise RunError("namespace configuration changed while awaiting admission; verify the new configuration before retrying")
                 claims = claims_in(path, config)
                 if any(item["run_id"] == run_id for item in claims) or (path / "finished" / (run_id + ".json")).exists():
                     raise RunError("run ID already exists; use a fresh run ID")
