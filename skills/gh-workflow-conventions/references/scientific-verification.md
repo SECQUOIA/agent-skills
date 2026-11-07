@@ -1,9 +1,9 @@
 # Scientific and Numerical Verification
 
-Use for changed scientific contracts, manuscript/formal-proof claims, reported
-quantitative results, solver claims, and requested benchmark work. Scope the audit
-to changed claims, equations, and relevant call paths; generic code changes do not
-require a scientific audit.
+Use for changed scientific contracts, manuscript/formal-proof claims,
+literature-backed recommendations, reported quantitative results, solver claims,
+and requested benchmark work. Scope the audit to changed claims, equations, and
+relevant call paths; generic code changes do not require a scientific audit.
 
 ## Equations, units, and independent checks
 
@@ -59,6 +59,14 @@ reported result with the run and an explicit justified error tolerance, not mere
 matching its inputs. A discrepancy should be reported before assigning its cause.
 If attributing a changed result to one input, rerun the old input under matched
 conditions or qualify that attribution.
+
+When empirical literature informs a recommendation, match the claim to the tested
+population/task, comparison, outcomes and uncertainty. A combined intervention
+does not isolate its components; observational or historical comparisons alone
+do not establish causation. A nonsignificant difference is not proof of no effect,
+and preference/interest is not comprehension or transfer. Distinguish tested
+findings from proposed adaptations and local heuristics, especially across delivery
+contexts. Mechanical artifact checks do not establish improved human outcomes.
 
 A DOI's valid redirect followed by publisher anti-bot 403/429 is not a broken DOI.
 Verify mapping/title through the resolver or authoritative metadata, and distinguish
