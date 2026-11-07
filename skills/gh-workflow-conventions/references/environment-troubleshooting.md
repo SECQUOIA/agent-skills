@@ -61,6 +61,14 @@ fast mode substitutes for the omitted execution. Likewise an optional solver's
 availability probe may need to launch a process: distinguish executable discovery,
 sandbox denial, and license failure.
 
+## Process diagnostics
+
+For hung hooks, workers, or other process failures, inspect known task PIDs and
+only needed non-sensitive metadata, for example
+`ps -p <pid> -o pid,ppid,etime,pcpu,stat,comm`. Avoid full argument or environment
+dumps: unrelated IDE or service processes can carry credentials. Filter any
+necessary command-line detail to the task and redact secrets before returning it.
+
 ## Documentation builds
 
 Match builder major versions to config formats before debugging content. For local
