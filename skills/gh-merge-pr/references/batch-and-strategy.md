@@ -1,6 +1,6 @@
 # Batch merges, conflicts and strategy
 
-Read for ordered batches, authority instructions, missing expected PRs, conflicting/stale bases, or rebase-only repositories. Apply shared [checkout](../../gh-workflow-conventions/references/worktrees-and-checkouts.md), [change hygiene](../../gh-workflow-conventions/references/change-hygiene.md), and [write rules](../../gh-workflow-conventions/references/github-writes.md) before branch or GitHub mutations.
+Read for ordered batches, authority instructions, missing expected PRs, conflicting/stale bases, rebase-only repositories, or branch retention. Apply shared [checkout](../../gh-workflow-conventions/references/worktrees-and-checkouts.md), [change hygiene](../../gh-workflow-conventions/references/change-hygiene.md), and [write rules](../../gh-workflow-conventions/references/github-writes.md) before branch or GitHub mutations.
 
 Resolve the actual requested set. If an expected count differs, inspect relevant PRs/branch heads against fresh base: report already-merged/absorbed work, and ask only when an ahead branch's intended role remains ambiguous. Do not invent a missing PR.
 
@@ -10,4 +10,24 @@ An explicitly authorized ordered sequence can include append-only base merges ne
 
 For a rebase strategy, read REST `rebaseable`. Merge-state CLEAN does not mean GitHub can rebase a history containing conflict-resolution merges. If rebaseable is false, report recovery options without improvising a force-push or repository-setting change. Explicitly authorized linearization can use a single commit carrying the reviewed tree with the intended base parent, preserving author credits; verify identical reviewed content/diff, use a lease against the old head, record superseded approval provenance in a new comment, and require fresh CI. Alternative merge-method settings need separate authorization.
 
-Do not delete branches by default. A stacked sibling may remain based on the retained predecessor branch after merge; read its base explicitly during handoff and retarget only if authorized.
+## Branch retention
+
+When retention is required, record the actual head repository, branch and SHA,
+and read the merge repository's live `delete_branch_on_merge`
+(`deleteBranchOnMerge`) setting. `gh pr merge --delete-branch=false` does not
+override GitHub's automatic deletion. If that behavior conflicts with the user's
+constraint, complete other readiness work and resolve the conflict before merging.
+Existing automation does not override user instructions; do not infer permission
+to change settings or to delete and recreate the branch.
+After a retention-sensitive merge, verify the source ref and its tip; report any
+movement without overwriting it.
+
+If an unexpected deletion has already occurred, report it accurately. Within
+authorized recovery, restore only the recorded source ref at its recorded SHA
+after verifying its absence and write access, using the shared write/readback
+rules. Preserve any recreated or moved ref; never force-update it. Restoration
+does not retroactively satisfy a no-deletion instruction or justify repeating the
+known side effect.
+
+A stacked sibling may remain based on the retained predecessor branch after
+merge; read its base explicitly during handoff and retarget only if authorized.
