@@ -68,6 +68,22 @@ evidence. The publisher still refreshes live gates immediately before acting.
 Use [rate-limit recovery](github-troubleshooting.md#rate-limits) when throttled;
 do not multiply retries across workers.
 
+## Batch writes and concurrency
+
+Before successive merges or pushes whose individual runs must be preserved,
+inspect the effective workflow/job concurrency groups, cancellation expressions,
+and queue settings for the affected events. GitHub's default single pending slot
+can replace an older pending run even with `cancel-in-progress: false`; a
+configured multi-run queue can retain it. See [GitHub's concurrency rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
+
+Before the next triggering write, wait until an earlier needed run leaves a
+replaceable pending slot, or finishes if running work would be cancelled.
+Re-read its actual state before proceeding. Do not serialize independent groups
+or queues that preserve the needed runs. When policy requires only the final
+combined run, report superseded runs accurately without inventing a gate for
+each intermediate commit. Use the existing observation budget; queue pressure
+does not authorize workflow/settings changes or manual cancellation.
+
 ## Events and actual execution
 
 - After draft → ready, inspect whether `ready_for_review` is a configured trigger.

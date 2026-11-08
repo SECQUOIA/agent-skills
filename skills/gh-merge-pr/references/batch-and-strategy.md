@@ -4,6 +4,8 @@ Read for ordered batches, authority instructions, missing expected PRs, conflict
 
 Resolve the actual requested set. If an expected count differs, inspect relevant PRs/branch heads against fresh base: report already-merged/absorbed work, and ask only when an ahead branch's intended role remains ambiguous. Do not invent a missing PR.
 
+Before the next merge, check [batch CI concurrency](../../gh-workflow-conventions/references/ci-and-checks.md#batch-writes-and-concurrency) for triggered runs that must be preserved; the next base push can displace an earlier pending run.
+
 Respect explicit dependencies or authoritative branches. When no dependency fixes order, consider landing a CI gate before changes it should validate. Test the combined tree where that interaction matters; identical content in both orders does not establish identical validation history.
 
 An explicitly authorized ordered sequence can include append-only base merges needed to update its PRs. Preserve distinct compatible work from both parents; authority governs overlapping semantics, not deletion of unrelated additions. Reuse a reviewed successor resolution only after verifying it preserves the sequence's invariants. Ambiguous conflicts require a concrete decision. Recheck current-head CI/reviews after every resulting push. A single-PR merge request does not automatically authorize editing unrelated siblings.
