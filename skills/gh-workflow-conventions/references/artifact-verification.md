@@ -53,6 +53,11 @@ contract when packaging is the defect being fixed.
 
 ## Recipient-specific deliveries
 
+For a delivery inventory, start from aggregate manifests or scoped summaries.
+Avoid printing recipient-identifying filenames or records into tool logs when
+summary evidence suffices. Read the selected private mapping or files needed for
+identity checks and report only the necessary findings.
+
 Verify personalized output sets against an authoritative recipient-to-record or
 page-range mapping rather than inferring identity from ordering. Check that each
 recipient receives only their intended material and approved common content,
