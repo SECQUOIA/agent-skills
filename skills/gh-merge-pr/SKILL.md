@@ -27,7 +27,7 @@ Validate key changed artifacts according to risk. When committed outputs could b
 
 ## Merge the verified head
 
-Use the requested strategy if repository policy permits it. Otherwise inspect allowed methods and prefer merge, then squash, then rebase. Check `rebaseable` before a rebase merge; CLEAN merge state alone does not prove rebaseability. Do not request branch deletion unless authorized or required by repository policy. When the user requires branch retention, read [branch retention](references/batch-and-strategy.md#branch-retention) before merging; CLI cleanup flags are not a retention guarantee.
+Use the requested strategy if repository policy permits it. Otherwise inspect allowed methods and prefer merge, then squash, then rebase. Check `rebaseable` before a rebase merge; CLEAN merge state alone does not prove rebaseability. Do not request branch deletion unless authorized or required by repository policy. When any branch must be retained or other PR states must remain unchanged, read [retention checks](references/batch-and-strategy.md#branch-retention) before selecting the strategy or merging; CLI cleanup flags are not a retention guarantee.
 
 Immediately before merging re-read state/head/gates, then run `gh pr merge <pr> --repo OWNER/REPO <strategy> --match-head-commit <verified-head>`. If the head changed, re-assess it; never retry without the head guard. Re-read the PR to verify MERGED state, merge time/commit, base, and URL. Ambiguous write outcomes require readback before any retry.
 

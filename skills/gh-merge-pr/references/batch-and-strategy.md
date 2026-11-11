@@ -14,6 +14,17 @@ For a rebase strategy, read REST `rebaseable`. Merge-state CLEAN does not mean G
 
 ## Branch retention
 
+For stacked PRs, record the heads, states and bases of other open PRs the user
+requires left unchanged. Check which heads would become reachable from their bases
+under the proposed strategy: a merge commit can indirectly mark an ancestor PR
+merged and expose its branch to automatic deletion. A request to merge the child
+does not waive those preservation constraints. An allowed squash can avoid that
+ancestry effect when it preserves the reviewed tree and required PR states;
+individual merge calls are not the boundary of the side effect. Explain the
+strategy/dependency disposition and verify the resulting tree plus protected
+PR states, heads, bases and refs after merging. Do not change repository settings,
+retarget PRs or close the ancestor without the corresponding authorization.
+
 When retention is required, record the actual head repository, branch and SHA,
 and read the merge repository's live `delete_branch_on_merge`
 (`deleteBranchOnMerge`) setting. `gh pr merge --delete-branch=false` does not
