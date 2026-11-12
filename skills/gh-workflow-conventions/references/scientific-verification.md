@@ -52,6 +52,14 @@ header/row widths, quoted delimiters, required dimensions, units, types, and mis
 or assumed values; named readers can silently shift interior columns. Execute any
 claimed consistency gate on the actual committed rows and consumer semantics.
 
+For statistical summaries, pair each estimate and interval with the same estimand,
+weighting, observation unit, cohort and endpoint. Equal-instance and equal-family
+means can differ; a family-bootstrap interval need not describe the displayed
+instance mean. Likewise, certification within a wall budget and at termination
+under a solver-time budget are different endpoints. Verify labeled table cells
+and passages against their producing fields; finding the correct numeric token
+elsewhere in a document does not validate the claim being checked.
+
 Trace quantitative and attributed claims to primary sources and their precise
 locations, following secondary references when necessary. Scope dataset-specific
 ranges to that dataset. A replication claim requires comparing the source's
