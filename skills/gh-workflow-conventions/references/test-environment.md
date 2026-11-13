@@ -9,6 +9,13 @@ installing anything; optional-backend, docs, and benchmark environments may diff
 Do not mutate a shared/base installation to make a check pass. If setup is needed,
 prefer an isolated scratch environment and already-compatible local caches.
 
+A solver-free adapter test must also respect its declared dependency profile.
+Faking optimization does not remove an optional native package required at
+import time. Where ordinary CI excludes that package, isolate a test double at
+the import boundary without contaminating shared module caches; exercise the
+available real backend separately when authorized. Do not install a proprietary
+dependency merely to make the solver-free cohort import successfully.
+
 Pin the working directory/project to an absolute path. Verify the selected
 interpreter, imported source, native build identity, and relevant subprocess PATH
 when those determine the result; [worktree guidance](worktrees-and-checkouts.md)

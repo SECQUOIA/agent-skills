@@ -30,6 +30,10 @@ does not mean the solver-native thread count. Preserve distinct settings such as
 single-thread BLAS with a separately declared multithreaded solver; setting both
 to the solver count can silently change an established study.
 
+When captured solver settings qualify measurement acceptance, apply the
+[native-parameter evidence guidance](../../gh-workflow-conventions/references/scientific-verification.md)
+to the worker's real adapter and capture channel before the measured matrix.
+
 Keep actual resident-memory/no-swap limits in the case cgroup and require the
 helper to verify them. Its declared memory reservation also includes supervisor
 overhead; include a separate controller's allowance in the aggregate plan.

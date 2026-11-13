@@ -154,6 +154,17 @@ multiplicities when ignoring harmless row ordering. Equal seeds with unequal wor
 do not establish or refute exact repeatability. Later seeded controls do not
 retroactively relabel earlier unseeded measurements.
 
+When native parameter evidence qualifies a run, test the channel the worker
+actually retains. Logs can omit default-valued parameters or start after setter
+messages were emitted. A requested options dictionary or a partial nondefault
+table does not establish every effective value. Prefer readback from the actual
+backend immediately before dispatch, including defaults, with call/source
+identity and timestamps; keep observed thread use as a separate check. Do not
+manufacture textual echoes from requested settings. Fixtures built only from
+invented setter lines prove parser behavior, not capture through the real adapter.
+When a plumbing solve is outside budget, exercise that adapter's control
+application/readback boundary without optimization and retain the coverage limit.
+
 A reusable benchmark validation gate must bind executable dependencies, including
 shared scoring/conversion code, runtime/backend identity and retained evidence,
 rather than only modified adapter files. Exercise the actual parsed gate and
