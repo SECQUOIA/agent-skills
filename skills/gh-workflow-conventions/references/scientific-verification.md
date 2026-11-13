@@ -36,6 +36,21 @@ quantifiers, hypotheses, and conventions; expose assumed bridges or weaker
 endpoints. Counts and a clean build do not validate manuscript claims or external
 numerical code.
 
+For a formalization roadmap or admitted prototype, distinguish a type-checked
+target interface from a completed theorem. Check the narrative's named interfaces
+against the actual declarations at the deliverable's dependency pins, including
+namespaces, binders, domains, and separate counts of definitions and theorem
+targets when reported. A successful interface build does not certify admitted
+mathematics; another repository's main-branch build is a different environment.
+
+When independent source-first review is explicitly required, provide the original
+conventions and version-specific passages separately from proposed diagnoses and
+prior findings. Preserve the reviewer's source orientation before releasing those
+assessments; bind actual read ranges and disclose prior exposure or later
+supplements. Matching hashes and another reviewer's source reading establish
+neither the recipient's reading nor semantic agreement. Apply the task's stated
+ordering without imposing this staging on unrelated work.
+
 When proof-route fidelity is requested, inspect every supplied written argument:
 a paper may give multiple routes or omit a promised proof. Record where the
 formalization follows, strengthens, replaces, or cannot complete those steps.
