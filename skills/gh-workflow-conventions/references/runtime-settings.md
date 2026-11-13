@@ -77,6 +77,15 @@ the effort value sent to the API. See
 
 ## Antigravity controls
 
+A requested reviewer missing from the active client's catalog may be available
+through another installed client. Check those catalogs before reporting it
+unavailable. Carbon is accessible through Antigravity: on 2026-11-13, `agy models`
+listed `gemini-4-carbon-low`, `gemini-4-carbon-medium`, and `gemini-4-carbon-high`.
+Recheck that live catalog and select the exact ID with `agy --model <id>`; for a
+model-specific Carbon request, do not infer its identity from a `pro` or
+orchestrator alias. Keep requested and client-reported identities distinct as
+described below.
+
 Antigravity executes commands through `run_command` in a secure sandbox by default.
 Commands requiring external network access (such as `gh` issue/PR interactions or git remote operations) require sandbox network permission or running with elevated permission (`BypassSandbox: true`). Use standard sandbox execution first unless external network access is strictly necessary.
 
