@@ -124,6 +124,10 @@ full argument lists and environment dumps.
 
 ## Status, cancellation and recovery
 
+For controllers that drain separately supervised cases, follow
+[service-harness shutdown](service-harnesses.md#clocks-and-shutdown) before using
+`stop` on their helper; cancelling its descendant tree can interrupt that drain.
+
 ```bash
 "$PYTHON" "$RUNNER" status --state-dir "$STATE"
 "$PYTHON" "$RUNNER" stop --state-dir "$STATE" --run-id RUN_ID

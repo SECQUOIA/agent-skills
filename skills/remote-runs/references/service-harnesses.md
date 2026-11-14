@@ -54,6 +54,18 @@ durable quiescence evidence. A hard kill or OOM can legitimately leave a retaine
 claim; a dead unit is not permission to delete it. Abort subsequent dispatch when
 either descendant quiescence or allocation release cannot be established.
 
+When a controller must drain separately supervised cases, use its verified
+graceful-stop interface while its resource helper remains alive. Cancelling the
+helper terminates the controller's descendant tree and can kill the cleanup
+clients it launches; a longer kill grace alone does not protect those clients.
+Verify each owned case's processes/cgroup and allocation closure separately, then
+controller/helper quiescence and final receipts. Controller-helper completion
+alone does not establish sibling-case closure. If graceful draining fails, retain
+claims and evidence and use the existing identity-checked operator recovery
+procedure. Exercise this shutdown path with a controller that launches cleanup
+clients for separately supervised cases; direct-child cancellation tests do not
+cover it.
+
 ## Logs and failure evidence
 
 The helper captures its child's stdout/stderr. Join those paths, and any nested
