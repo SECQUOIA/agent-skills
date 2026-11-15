@@ -381,6 +381,9 @@ class SkillScannerRunnerTests(unittest.TestCase):
         self.assertIn("--require-hashes", workflow_text)
         self.assertIn("--no-deps", workflow_text)
         workflow = yaml.safe_load(workflow_text)
+        job_env = workflow["jobs"]["nvidia-skill-scan"]["env"]
+        self.assertEqual(job_env.get("PYTHONDONTWRITEBYTECODE"), "1")
+        self.assertEqual(job_env.get("SKILLEVALUATOR_REQUIRE_SEMGREP"), "1")
         triggers = workflow.get("on") or workflow.get(True)
         self.assertIsInstance(triggers, dict)
         self.assertNotIn("pull_request", triggers)
@@ -395,6 +398,16 @@ class SkillScannerRunnerTests(unittest.TestCase):
             lock_text = lock_path.read_text(encoding="utf-8")
             self.assertIn("--hash=sha256:", lock_text)
             self.assertNotIn("skills-local", lock_text)
+
+        scanner_lock = (ROOT / ".github/requirements-scanner.txt").read_text(encoding="utf-8")
+        for required_pin in (
+            "skillevaluator==",
+            "skillspector @ https://github.com/NVIDIA/SkillSpector/releases/download/",
+            "bandit==",
+            "semgrep==",
+            "ruff==",
+        ):
+            self.assertIn(required_pin, scanner_lock)
 
         baseline_path = ROOT / ".github/skillspector-baseline.yaml"
         self.assertTrue(baseline_path.is_file())
