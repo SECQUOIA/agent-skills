@@ -327,9 +327,13 @@ def run_hooks(
 
 
 class HookConfigState(NamedTuple):
-    status: str  # "configured", "absent", "disabled", "foreign", "invalid"
+    status: str  # "configured", "absent", "disabled", "foreign", "malformed_handler", "invalid"
     mode: str | None = None
     detail: str | None = None
+    owned_modes: tuple[str, ...] = ()
+    foreign_modes: tuple[str, ...] = ()
+    disabled_modes: tuple[str, ...] = ()
+    has_malformed_handler: bool = False
 
 
 def owned_hook_scripts(repo: Path, roots: list[Path]) -> set[Path]:
@@ -388,6 +392,8 @@ def inspect_hook_config(
         return HookConfigState("invalid", detail="not a regular file")
     try:
         raw = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return HookConfigState("invalid", detail="invalid UTF-8 encoding")
     except OSError as exc:
         return HookConfigState("invalid", detail=f"unreadable ({type(exc).__name__})")
     try:
@@ -454,19 +460,53 @@ def inspect_hook_config(
                             elif kind == "malformed":
                                 malformed_cmd = True
 
-    if owned_modes:
-        mode_str = next(iter(owned_modes)) if len(owned_modes) == 1 else "/".join(sorted(owned_modes))
-        return HookConfigState("configured", mode=mode_str)
-    if malformed_cmd:
-        return HookConfigState("invalid", detail="malformed SECQUOIA hook command")
-    if foreign_modes:
-        mode_str = next(iter(foreign_modes)) if len(foreign_modes) == 1 else "/".join(sorted(foreign_modes))
+    owned_tuple = tuple(sorted(owned_modes))
+    foreign_tuple = tuple(sorted(foreign_modes))
+    disabled_tuple = tuple(sorted(disabled_modes))
+
+    if owned_tuple:
+        details: list[str] = []
+        if foreign_tuple:
+            details.append(
+                f"also has other-checkout/missing-runner handler(s): {'/'.join(foreign_tuple)}"
+            )
+        if malformed_cmd:
+            details.append("also has malformed SECQUOIA hook command")
         return HookConfigState(
-            "foreign", mode=mode_str, detail="other checkout or missing runner"
+            "configured",
+            mode="/".join(owned_tuple),
+            detail="; ".join(details) if details else None,
+            owned_modes=owned_tuple,
+            foreign_modes=foreign_tuple,
+            disabled_modes=disabled_tuple,
+            has_malformed_handler=malformed_cmd,
         )
-    if disabled_modes:
-        mode_str = next(iter(disabled_modes)) if len(disabled_modes) == 1 else "/".join(sorted(disabled_modes))
-        return HookConfigState("disabled", mode=mode_str, detail="enabled: false")
+    if foreign_tuple:
+        detail = "other checkout or missing runner"
+        if malformed_cmd:
+            detail += "; also has malformed SECQUOIA hook command"
+        return HookConfigState(
+            "foreign",
+            mode="/".join(foreign_tuple),
+            detail=detail,
+            foreign_modes=foreign_tuple,
+            disabled_modes=disabled_tuple,
+            has_malformed_handler=malformed_cmd,
+        )
+    if malformed_cmd:
+        return HookConfigState(
+            "malformed_handler",
+            detail="malformed SECQUOIA hook command",
+            disabled_modes=disabled_tuple,
+            has_malformed_handler=True,
+        )
+    if disabled_tuple:
+        return HookConfigState(
+            "disabled",
+            mode="/".join(disabled_tuple),
+            detail="enabled: false",
+            disabled_modes=disabled_tuple,
+        )
     return HookConfigState("absent")
 
 
@@ -522,10 +562,32 @@ def format_install_command(base_args: Sequence[str], hook_args: Sequence[str]) -
     return " ".join(parts)
 
 
-def _format_inactive_target(name: str, path: Path, state: HookConfigState) -> str:
+def _client_clean_modes(state: HookConfigState) -> set[str]:
+    return {
+        m
+        for m in (*state.owned_modes, *state.foreign_modes, *state.disabled_modes)
+        if m in {"audit", "enforce"}
+    }
+
+
+def _is_healthy_owned(state: HookConfigState) -> bool:
+    return (
+        state.status == "configured"
+        and len(state.owned_modes) == 1
+        and state.owned_modes[0] in {"audit", "enforce"}
+        and not state.foreign_modes
+        and not state.has_malformed_handler
+    )
+
+
+def _format_repair_target(name: str, path: Path, state: HookConfigState) -> str:
     if state.status == "absent":
         return f"{name} ({path})"
-    return f"{name} ({path}: {state.detail})"
+    if state.status == "foreign" and state.mode:
+        return f"{name} ({path}: {state.detail}, mode={state.mode})"
+    if state.detail:
+        return f"{name} ({path}: {state.detail})"
+    return f"{name} ({path}: mode={state.mode})"
 
 
 def report_hook_parity(
@@ -569,108 +631,132 @@ def report_hook_parity(
             f" ({path}: {state.detail}). Repair or back up that file before installing hooks."
         )
 
-    configured = [
+    valid_clients = [
         (name, hook_flag, path, state)
         for name, hook_flag, path, state in inspected
-        if state.status == "configured"
+        if state.status != "invalid"
     ]
-    inactive = [
-        (name, hook_flag, path, state)
-        for name, hook_flag, path, state in inspected
-        if state.status in {"absent", "disabled", "foreign"}
-    ]
-    if not configured:
-        stale = [
-            (name, hook_flag, path, state)
-            for name, hook_flag, path, state in inactive
-            if state.status == "foreign"
-        ]
-        if stale:
-            stale_text = ", ".join(
-                _format_inactive_target(name, path, state)
-                for name, _, path, state in stale
-            )
-            stale_modes = {
-                state.mode for _, _, _, state in stale if state.mode in {"audit", "enforce"}
-            }
-            mode = next(iter(stale_modes)) if len(stale_modes) == 1 else "audit"
-            hook_flags = (
-                [f"{flag}={mode}" for _, flag, _, _ in stale]
-                if invalid
-                else [f"--hooks={mode}"]
-            )
-            cmd = format_install_command(base_install_args, hook_flags)
+    for name, _, path, state in valid_clients:
+        if state.has_malformed_handler:
             print(
-                f"Hook parity note: SECQUOIA encounter hooks in {stale_text}"
-                f" point to another checkout or missing runner. Run {cmd} to refresh them."
+                f"Hook parity warning: malformed SECQUOIA hook command in {name} ({path})."
             )
+        if state.owned_modes and state.foreign_modes:
+            print(
+                f"Hook parity warning: {name} ({path}) mixes this checkout's hooks"
+                f" ({'/'.join(state.owned_modes)}) with another checkout or missing runner"
+                f" ({'/'.join(state.foreign_modes)})."
+            )
+
+    has_active_or_broken = any(
+        bool(state.owned_modes or state.foreign_modes or state.has_malformed_handler)
+        for _, _, _, state in valid_clients
+    )
+    if not has_active_or_broken:
         return
 
-    distinct_modes = {state.mode for _, _, _, state in configured if state.mode is not None}
-    single_clean_mode = (
-        next(iter(distinct_modes))
-        if len(distinct_modes) == 1 and next(iter(distinct_modes)) in {"audit", "enforce"}
-        else None
-    )
-    configured_text = ", ".join(
-        f"{name} ({state.mode})" for name, _, _, state in configured
-    )
+    global_active_modes = {
+        m
+        for _, _, _, state in valid_clients
+        for m in (*state.owned_modes, *state.foreign_modes)
+        if m in {"audit", "enforce"}
+    }
+    default_new_mode = "enforce" if global_active_modes == {"enforce"} else "audit"
 
-    if not inactive and not invalid:
-        if single_clean_mode is not None:
+    def preserved_mode(state: HookConfigState) -> str:
+        modes = _client_clean_modes(state)
+        if "enforce" in modes:
+            return "enforce"
+        if "audit" in modes:
+            return "audit"
+        return default_new_mode
+
+    needs_repair = [
+        (name, hook_flag, path, state)
+        for name, hook_flag, path, state in valid_clients
+        if not _is_healthy_owned(state)
+    ]
+    healthy = [
+        (name, hook_flag, path, state)
+        for name, hook_flag, path, state in valid_clients
+        if _is_healthy_owned(state)
+    ]
+
+    if not needs_repair:
+        healthy_modes = {state.owned_modes[0] for _, _, _, state in healthy}
+        configured_text = ", ".join(
+            f"{name} ({state.mode})" for name, _, _, state in healthy
+        )
+        if not invalid:
+            if len(healthy_modes) <= 1:
+                return
+            audit_cmd = format_install_command(base_install_args, ["--hooks=audit"])
+            enforce_cmd = format_install_command(base_install_args, ["--hooks=enforce"])
+            print(
+                f"Hook parity note: SECQUOIA encounter hooks use mixed modes across clients: {configured_text}."
+                f" Run {audit_cmd} or {enforce_cmd} if you want one mode across all active clients."
+            )
             return
-        audit_cmd = format_install_command(base_install_args, ["--hooks=audit"])
-        enforce_cmd = format_install_command(base_install_args, ["--hooks=enforce"])
-        print(
-            f"Hook parity note: SECQUOIA encounter hooks use mixed modes across clients: {configured_text}."
-            f" Run {audit_cmd} or {enforce_cmd} if you want one mode across all active clients."
-        )
-        return
-
-    if inactive:
-        inactive_text = ", ".join(
-            _format_inactive_target(name, path, state)
-            for name, _, path, state in inactive
-        )
-        if single_clean_mode is not None and not invalid:
-            cmd = format_install_command(
-                base_install_args, [f"--hooks={single_clean_mode}"]
-            )
-            print(
-                f"Hook parity note: SECQUOIA encounter hooks are configured for {configured_text}"
-                f" but missing or inactive for {inactive_text}. Run {cmd} to align all active clients."
-            )
-        elif single_clean_mode is not None:
-            per_client = [
-                f"{hook_flag}={single_clean_mode}" for _, hook_flag, _, _ in inactive
-            ]
-            cmd = format_install_command(base_install_args, per_client)
-            print(
-                f"Hook parity note: SECQUOIA encounter hooks are configured for {configured_text}"
-                f" but missing or inactive for {inactive_text}. Run {cmd} to configure valid targets"
-                f" without touching the invalid file(s) above."
-            )
-        else:
-            per_client = [f"{hook_flag}=audit" for _, hook_flag, _, _ in inactive]
-            preserve_cmd = format_install_command(base_install_args, per_client)
-            print(
-                f"Hook parity note: SECQUOIA encounter hooks use mixed modes for {configured_text}"
-                f" and are missing or inactive for {inactive_text}. Run {preserve_cmd} to configure"
-                f" the remaining client(s) in audit mode without changing existing modes"
-                f" (or pass --hooks=audit / --hooks=enforce to set one mode across all active clients)."
-            )
-    elif invalid:
         invalid_names = ", ".join(name for name, _, _, _ in invalid)
         hook_args = (
-            [f"--hooks={single_clean_mode}"]
-            if single_clean_mode is not None
-            else [f"{hook_flag}=audit" for _, hook_flag, _, _ in invalid]
+            [f"--hooks={next(iter(healthy_modes))}"]
+            if len(healthy_modes) == 1
+            else [f"{hook_flag}={default_new_mode}" for _, hook_flag, _, _ in invalid]
         )
         cmd = format_install_command(base_install_args, hook_args)
         print(
             f"Hook parity note: SECQUOIA encounter hooks are configured for {configured_text};"
             f" after fixing the invalid configuration for {invalid_names}, run {cmd}."
         )
+        return
+
+    all_target_modes = {preserved_mode(state) for _, _, _, state in valid_clients}
+    can_use_unified_flag = (
+        not invalid
+        and len(all_target_modes) == 1
+        and all(len(_client_clean_modes(state)) <= 1 for _, _, _, state in valid_clients)
+    )
+    repair_text = ", ".join(
+        _format_repair_target(name, path, state) for name, _, path, state in needs_repair
+    )
+    if can_use_unified_flag:
+        uniform_mode = next(iter(all_target_modes))
+        cmd = format_install_command(base_install_args, [f"--hooks={uniform_mode}"])
+        if healthy:
+            healthy_text = ", ".join(
+                f"{name} ({state.mode})" for name, _, _, state in healthy
+            )
+            print(
+                f"Hook parity note: SECQUOIA encounter hooks are configured for {healthy_text}"
+                f" but missing or inactive for {repair_text}. Run {cmd} to align all active clients."
+            )
+        else:
+            print(
+                f"Hook parity note: SECQUOIA encounter hooks need refresh for {repair_text}."
+                f" Run {cmd} to align all active clients."
+            )
+        return
+
+    per_client_flags = [
+        f"{hook_flag}={preserved_mode(state)}" for _, hook_flag, _, state in needs_repair
+    ]
+    preserve_cmd = format_install_command(base_install_args, per_client_flags)
+    active_descriptions = []
+    for name, _, _, state in valid_clients:
+        if state.status == "configured":
+            label = f"{name} ({state.mode})"
+            if state.foreign_modes:
+                label += f" + foreign ({'/'.join(state.foreign_modes)})"
+            active_descriptions.append(label)
+        elif state.status == "foreign":
+            active_descriptions.append(f"{name} (foreign {state.mode})")
+    active_text = ", ".join(active_descriptions) if active_descriptions else "partial/broken handlers"
+    print(
+        f"Hook parity note: SECQUOIA encounter hooks have active state [{active_text}]"
+        f" and need setup or refresh for {repair_text}. Run {preserve_cmd} to configure"
+        f" the remaining client(s) without changing existing modes"
+        f" (or pass --hooks=audit / --hooks=enforce once all hook files are valid to set one mode across all active clients)."
+    )
 
 
 def install(

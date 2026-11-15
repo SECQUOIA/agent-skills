@@ -3555,9 +3555,9 @@ class EncounterLedgerTests(unittest.TestCase):
         )
         self.assertEqual(res_str_2["decision"], "stop")
 
-        # 3. Malformed executionNum values do not crash Stop handling
+        # 3. Malformed executionNum values (including Unicode superscript digits and >4300 digits) do not crash
         write_event("ag-bad-exec", "toolu_bad_exec_1", 1)
-        for bad_exec in (None, "not-an-int", True, -1):
+        for bad_exec in (None, "not-an-int", "²", "9" * 4305, True, -1):
             res_bad = ledger.run_hook(
                 {
                     "conversationId": "ag-bad-exec",
@@ -3586,7 +3586,7 @@ class EncounterLedgerTests(unittest.TestCase):
                     ),
                     step_7_id,
                 )
-        for bad_step in (None, "", "   ", "null", -1, True, [], {}):
+        for bad_step in (None, "", "   ", "null", "²", "9" * 4305, -1, True, [], {}):
             with self.subTest(bad_step=bad_step):
                 self.assertEqual(
                     ledger._tool_use_id({"toolCall": {"id": "   "}, "stepIdx": bad_step}),

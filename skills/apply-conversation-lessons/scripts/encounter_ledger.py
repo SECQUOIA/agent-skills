@@ -3785,7 +3785,7 @@ def _nonnegative_int(raw: Any) -> int | None:
         return raw
     if isinstance(raw, str):
         stripped = raw.strip()
-        if stripped.isdigit():
+        if 0 < len(stripped) <= 20 and stripped.isascii() and stripped.isdigit():
             return int(stripped)
     return None
 

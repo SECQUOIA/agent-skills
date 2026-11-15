@@ -579,7 +579,15 @@ class InstallationTests(unittest.TestCase):
         disabled = self.run_script("install")
         self.assertIn("enabled: false", disabled.stdout)
 
-        # 4. Foreign checkout runner in Codex is detected rather than counted as owned
+        # 4. Invalid UTF-8 bytes emit invalid UTF-8 warning without crashing or leaking bytes
+        agy_hooks.write_bytes(b"\xff\xfe\x00RAW_SECRET_BYTES")
+        bad_utf8 = self.run_script("install")
+        self.assertIn("invalid UTF-8 encoding", bad_utf8.stdout)
+        self.assertNotIn("RAW_SECRET_BYTES", bad_utf8.stdout)
+        agy_hooks.unlink()
+
+        # 5. Foreign checkout enforce in Codex + owned audit in Claude + missing Antigravity
+        #    preserves Codex=enforce when executing the suggested repair command
         foreign_script = self.base / "foreign_repo/skills/apply-conversation-lessons/scripts/encounter_ledger.py"
         foreign_script.parent.mkdir(parents=True)
         foreign_script.write_text("# foreign\n")
@@ -594,7 +602,7 @@ class InstallationTests(unittest.TestCase):
                                         "type": "command",
                                         "command": (
                                             f"python3 '{foreign_script}' hook --agent codex"
-                                            " --mode audit --installation-id secquoia-encounter-ledger"
+                                            " --mode enforce --installation-id secquoia-encounter-ledger"
                                         ),
                                     }
                                 ]
@@ -604,9 +612,75 @@ class InstallationTests(unittest.TestCase):
                 }
             )
         )
-        agy_hooks.unlink()
         foreign = self.run_script("install")
         self.assertIn("other checkout or missing runner", foreign.stdout)
+        self.assertIn("--codex-hooks=enforce", foreign.stdout)
+        self.assertIn("--antigravity-hooks=audit", foreign.stdout)
+        foreign_match = re.search(
+            r"Run (\./install\.sh .+?) to configure the remaining client\(s\)",
+            foreign.stdout,
+        )
+        self.assertIsNotNone(foreign_match, foreign.stdout)
+        foreign_tokens = shlex.split(foreign_match.group(1))
+        foreign_repair = subprocess.run(
+            ["bash", str(self.repo / "install.sh"), *foreign_tokens[1:]],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        self.assertEqual(foreign_repair.returncode, 0, foreign_repair.stdout + foreign_repair.stderr)
+        codex_repaired = [h["command"] for h in self.hooks(self.home / ".codex/hooks.json")]
+        self.assertTrue(all("--mode enforce" in c for c in codex_repaired))
+        self.assertTrue(all(str(foreign_script) not in c for c in codex_repaired))
+        claude_repaired = [h["command"] for h in self.hooks(self.home / ".claude/settings.json")]
+        self.assertTrue(all("--mode audit" in c for c in claude_repaired))
+
+        # 6. Owned handler sharing a file with foreign or malformed sibling handlers still warns
+        owned_codex_script = self.modern / "apply-conversation-lessons/scripts/encounter_ledger.py"
+        (self.home / ".codex/hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "^Bash$",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": (
+                                            f"python3 '{owned_codex_script}' hook --agent codex"
+                                            " --mode audit --installation-id secquoia-encounter-ledger"
+                                        ),
+                                    }
+                                ],
+                            }
+                        ],
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": (
+                                            f"python3 '{foreign_script}' hook --agent codex"
+                                            " --mode enforce --installation-id secquoia-encounter-ledger"
+                                        ),
+                                    },
+                                    {
+                                        "type": "command",
+                                        "command": "python3 'unterminated --installation-id secquoia-encounter-ledger",
+                                    },
+                                ]
+                            }
+                        ],
+                    }
+                }
+            )
+        )
+        mixed_siblings = self.run_script("install")
+        self.assertIn("malformed SECQUOIA hook command in Codex", mixed_siblings.stdout)
+        self.assertIn("mixes this checkout's hooks (audit) with another checkout or missing runner (enforce)", mixed_siblings.stdout)
+        self.assertIn("--codex-hooks=enforce", mixed_siblings.stdout)
 
 
 if __name__ == "__main__":
