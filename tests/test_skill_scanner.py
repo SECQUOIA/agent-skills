@@ -409,6 +409,29 @@ class SkillScannerRunnerTests(unittest.TestCase):
         ):
             self.assertIn(required_pin, scanner_lock)
 
+        otel_core_versions: dict[str, str] = {}
+        for line in scanner_lock.splitlines():
+            for pkg in (
+                "opentelemetry-api",
+                "opentelemetry-sdk",
+                "opentelemetry-exporter-otlp-proto-common",
+                "opentelemetry-exporter-otlp-proto-http",
+                "opentelemetry-proto",
+            ):
+                prefix = f"{pkg}=="
+                if line.startswith(prefix):
+                    otel_core_versions[pkg] = line[len(prefix) :].split()[0]
+        self.assertEqual(
+            len(otel_core_versions),
+            5,
+            f"Missing core opentelemetry packages in lockfile: {otel_core_versions}",
+        )
+        self.assertEqual(
+            len(set(otel_core_versions.values())),
+            1,
+            f"Core opentelemetry packages must stay version-aligned: {otel_core_versions}",
+        )
+
         baseline_path = ROOT / ".github/skillspector-baseline.yaml"
         self.assertTrue(baseline_path.is_file())
         baseline_text = baseline_path.read_text(encoding="utf-8")
