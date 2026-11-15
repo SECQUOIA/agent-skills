@@ -3314,6 +3314,147 @@ class EncounterLedgerTests(unittest.TestCase):
         self.assertIn("injectSteps", res_start)
         self.assertIn("systemMessage", res_start["injectSteps"][0])
 
+    def test_antigravity_toolcall_id_correlation_and_continuation_active(self):
+        state_dir = Path(self.temporary.name) / "antigravity_protojson_state"
+        # Preflight list read enables gh pr create
+        preflight = {
+            "conversationId": "ag-conv-proto",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hookEventName": "PostToolUse",
+            "toolCall": {
+                "id": "toolu_read_1",
+                "name": "run_command",
+                "args": {"CommandLine": "gh pr list --repo owner/repo"},
+            },
+            "stepIdx": 3,
+        }
+        ledger.run_hook(
+            preflight, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+
+        # PreToolUse and PostToolUse share toolCall.id even when stepIdx differs
+        create_pre = {
+            "conversationId": "ag-conv-proto",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hookEventName": "PreToolUse",
+            "toolCall": {
+                "id": "toolu_create_1",
+                "name": "run_command",
+                "args": {"CommandLine": "gh pr create --repo owner/repo --title t --body b"},
+            },
+            "stepIdx": 19,
+        }
+        res_pre = ledger.run_hook(
+            create_pre, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_pre, {"decision": "allow"})
+
+        create_post = {
+            "conversationId": "ag-conv-proto",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hookEventName": "PostToolUse",
+            "toolCall": {
+                "id": "toolu_create_1",
+                "name": "run_command",
+                "args": {"CommandLine": "gh pr create --repo owner/repo --title t --body b"},
+            },
+            "stepIdx": 5,
+        }
+        ledger.run_hook(
+            create_post, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        with contextlib.closing(ledger.connect_database(str(state_dir))) as connection:
+            row = connection.execute(
+                "SELECT pending_write, pending_count FROM hook_activity WHERE pending_write = 1"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["pending_count"], 1)
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM hook_tools").fetchone()[0], 0
+            )
+
+        # 0-indexed Stop blocks once when continuationActive is false, then stops when true
+        stop_initial = {
+            "conversationId": "ag-conv-proto",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hookEventName": "Stop",
+            "executionNum": 0,
+            "continuationActive": False,
+            "terminationReason": "NO_TOOL_CALL",
+        }
+        res_stop_0 = ledger.run_hook(
+            stop_initial, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_stop_0["decision"], "continue")
+
+        stop_reentry = {
+            "conversationId": "ag-conv-proto",
+            "workspacePaths": ["/tmp/test-repo"],
+            "hookEventName": "Stop",
+            "executionNum": 1,
+            "continuationActive": True,
+            "terminationReason": "NO_TOOL_CALL",
+        }
+        res_stop_1 = ledger.run_hook(
+            stop_reentry, agent="antigravity", mode="enforce", explicit_state_dir=str(state_dir)
+        )
+        self.assertEqual(res_stop_1["decision"], "stop")
+
+        # Later turn with executionNum > 1 but continuationActive=False still enforces Stop
+        ledger.run_hook(
+            {
+                "conversationId": "ag-conv-proto",
+                "workspacePaths": ["/tmp/test-repo"],
+                "hookEventName": "PostToolUse",
+                "toolCall": {
+                    "id": "toolu_write_2",
+                    "name": "run_command",
+                    "args": {"CommandLine": "gh pr close 99 --repo owner/repo"},
+                },
+                "stepIdx": 25,
+            },
+            agent="antigravity",
+            mode="enforce",
+            explicit_state_dir=str(state_dir),
+        )
+        res_stop_later = ledger.run_hook(
+            {
+                "conversationId": "ag-conv-proto",
+                "workspacePaths": ["/tmp/test-repo"],
+                "hookEventName": "Stop",
+                "executionNum": 4,
+                "continuationActive": False,
+                "terminationReason": "NO_TOOL_CALL",
+            },
+            agent="antigravity",
+            mode="enforce",
+            explicit_state_dir=str(state_dir),
+        )
+        self.assertEqual(res_stop_later["decision"], "continue")
+
+        # Budget/invocation ceiling does not force continuation
+        res_stop_budget = ledger.run_hook(
+            {
+                "conversationId": "ag-conv-proto",
+                "workspacePaths": ["/tmp/test-repo"],
+                "hookEventName": "Stop",
+                "executionNum": 4,
+                "continuationActive": False,
+                "terminationReason": "MAX_TOKEN_BUDGET_EXCEEDED",
+            },
+            agent="antigravity",
+            mode="enforce",
+            explicit_state_dir=str(state_dir),
+        )
+        self.assertEqual(res_stop_budget["decision"], "stop")
+
+        self.assertEqual(
+            ledger._payload_runtime(
+                {"hookEventName": "PreInvocation", "modelName": "gemini-4-hydrogen-high"}
+            )["event"],
+            "PreInvocation",
+        )
+
 
 def claude_payload(event: str, command: str = "", response=None, **extra):
     """A payload in the exact shape Claude Code v2.1.x sends: no turn_id, and

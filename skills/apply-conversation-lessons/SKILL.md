@@ -26,10 +26,9 @@ change only the smallest appropriate owner.
    inspect its symlink destination and the executing sandbox's filesystem
    visibility before declaring it missing. Resolve the path with `readlink -f`
    where available; execution outside permitted roots requires supported,
-   authorized filesystem access, which may involve Antigravity's
-   `BypassSandbox: true` when allowed by the active runtime. If that access is
-   unavailable, report the helper as inaccessible and continue triage using
-   available evidence.
+   authorized filesystem access in the active runtime or project permissions.
+   If that access is unavailable, report the helper as inaccessible and
+   continue triage using available evidence.
 4. Keep lessons that prevent plausible wrong results, silent damage, or repeated
    expensive rediscovery. Retire one-off facts, obvious recoverable command errors,
    generic advice, and preferences already supplied by higher-level instructions.

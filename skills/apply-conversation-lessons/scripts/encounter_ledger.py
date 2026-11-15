@@ -687,6 +687,8 @@ def _payload_runtime(payload: dict[str, Any]) -> dict[str, str | None]:
         in {
             "SessionStart",
             "UserPromptSubmit",
+            "PreInvocation",
+            "PostInvocation",
             "PreToolUse",
             "PostToolUse",
             "PostToolUseFailure",
@@ -3772,6 +3774,10 @@ def _advance_session_epoch(connection: sqlite3.Connection, session_id: str) -> N
 
 def _tool_use_id(payload: dict[str, Any]) -> str:
     value = payload.get("tool_use_id")
+    if not value:
+        tool_call = payload.get("toolCall")
+        if isinstance(tool_call, dict):
+            value = tool_call.get("id")
     if not value and "stepIdx" in payload:
         value = f"step-{payload['stepIdx']}"
     return _runtime_id("tool", value) if value else ""
@@ -4522,9 +4528,22 @@ def _stop(
         # that cannot perform the readback (for example, gh became
         # unavailable). The re-entry downgrades to an escape with an advisory.
         if agent == "antigravity":
+            continuation = (
+                bool(payload["continuationActive"])
+                if "continuationActive" in payload
+                else payload.get("executionNum", 1) > 1
+            )
             already_continued = (
-                payload.get("executionNum", 1) > 1
-                or payload.get("terminationReason") in {"MAX_FORCED_INVOCATIONS", "USER_CANCELED", "ERROR"}
+                continuation
+                or payload.get("terminationReason")
+                in {
+                    "MAX_INVOCATIONS",
+                    "MAX_FORCED_INVOCATIONS",
+                    "MAX_TOKEN_BUDGET_EXCEEDED",
+                    "TERMINAL_CUSTOM_HOOK",
+                    "USER_CANCELED",
+                    "ERROR",
+                }
                 or bool(payload.get("stop_hook_active"))
             )
         else:
