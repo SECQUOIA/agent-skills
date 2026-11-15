@@ -849,6 +849,47 @@ class RemoteRunsTests(unittest.TestCase):
         self.assertFalse(marker.exists())
         self.assertEqual(broken.read_text(), "{not-json")
 
+    def test_dash_b_runner_and_worker_leave_zero_bytecode_in_scripts_dir(self):
+        copied_scripts = self.root / "copied-scripts"
+        copied_scripts.mkdir()
+        for name in ("remote_run.py", "resource_probe.py"):
+            (copied_scripts / name).write_bytes((SCRIPTS / name).read_bytes())
+        runner_copy = copied_scripts / "remote_run.py"
+        original_file = self.runner.__file__
+        prior_env = os.environ.pop("PYTHONDONTWRITEBYTECODE", None)
+        try:
+            self.runner.__file__ = str(runner_copy)
+            call = self.run_job("dash-b-worker", "raise SystemExit(0)")
+            self.assertEqual(call.wait(), 0, call.stdout + call.stderr)
+        finally:
+            self.runner.__file__ = original_file
+            if prior_env is not None:
+                os.environ["PYTHONDONTWRITEBYTECODE"] = prior_env
+        self.assertFalse((copied_scripts / "__pycache__").exists())
+        self.assertEqual(list(copied_scripts.rglob("*.pyc")), [])
+
+
+class RemoteRunBytecodeContractTests(unittest.TestCase):
+    def test_worker_command_includes_dash_b_and_startup_writes_no_bytecode(self):
+        source = (SCRIPTS / "remote_run.py").read_text(encoding="utf-8")
+        self.assertIn('[sys.executable, "-B", str(script), "_worker"', source)
+        with tempfile.TemporaryDirectory() as tmp:
+            copied_scripts = Path(tmp) / "scripts"
+            copied_scripts.mkdir()
+            for name in ("remote_run status", "remote_run.py", "resource_probe.py"):
+                if name.endswith(".py"):
+                    (copied_scripts / name).write_bytes((SCRIPTS / name).read_bytes())
+            env = {k: v for k, v in os.environ.items() if k != "PYTHONDONTWRITEBYTECODE"}
+            proc = subprocess.run(
+                [sys.executable, "-B", str(copied_scripts / "remote_run.py"), "--help"],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertFalse((copied_scripts / "__pycache__").exists())
+            self.assertEqual(list(copied_scripts.rglob("*.pyc")), [])
+
 
 if __name__ == "__main__":
     unittest.main()

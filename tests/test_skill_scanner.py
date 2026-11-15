@@ -30,7 +30,10 @@ class SkillScannerRunnerTests(unittest.TestCase):
         self.base = Path(self.temp.name)
         self.skills_root = self.base / "skills"
         self.baseline = self.base / "skillspector-baseline.yaml"
-        self.baseline.write_text("version: 2\nscanner_version: '2.13.4'\nfingerprints: []\n", encoding="utf-8")
+        self.baseline.write_text(
+            "version: 2\nscanner_version: '2.13.4'\nfingerprints: []\n",
+            encoding="utf-8",
+        )
         for name in ("alpha-skill", "beta-skill"):
             skill_dir = self.skills_root / name
             skill_dir.mkdir(parents=True)
@@ -88,6 +91,43 @@ class SkillScannerRunnerTests(unittest.TestCase):
         self.assertTrue(summary["overall_passed"])
         self.assertEqual(summary["skills_scanned"], 2)
         self.assertTrue((out_dir / "summary.json").is_file())
+        self.assertTrue((out_dir / "alpha-skill" / "skillevaluator-tier1.json").is_file())
+
+    def test_stale_existing_report_in_output_dir_cannot_produce_false_pass(self) -> None:
+        out_dir = self.base / "reused-reports"
+        for name in ("alpha-skill", "beta-skill"):
+            stale_dir = out_dir / name
+            stale_dir.mkdir(parents=True)
+            (stale_dir / "skillevaluator-tier1.json").write_text(
+                json.dumps(
+                    {
+                        "overall_passed": True,
+                        "overall_status": "passed",
+                        "incomplete_scans": [],
+                        "total_errors": 0,
+                        "total_warnings": 0,
+                        "results": [
+                            {
+                                "validator": "QUALITY",
+                                "quality": {"overall_score": 95.0, "grade": "A"},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+        noop_bin = self.make_fake_skillevaluator("import sys; sys.exit(0)\n")
+        code, summary, failures = scanner.run_scan(
+            self.skills_root,
+            baseline=self.baseline,
+            min_score=70,
+            skillevaluator_bin=str(noop_bin),
+            output_dir=out_dir,
+        )
+        self.assertEqual(code, 1)
+        self.assertFalse(summary["overall_passed"])
+        self.assertEqual(len(failures), 2)
+        self.assertFalse((out_dir / "alpha-skill" / "skillevaluator-tier1.json").exists())
 
     def test_no_baseline_omits_baseline_flag(self) -> None:
         fake_bin = self.make_fake_skillevaluator(
@@ -121,55 +161,103 @@ class SkillScannerRunnerTests(unittest.TestCase):
         self.assertIsNone(summary["baseline"])
         self.assertEqual(failures, [])
 
-    def test_fails_closed_on_incomplete_scans_or_failed_gate_or_low_score(self) -> None:
-        cases = [
+    def test_fails_closed_on_incomplete_scans_failed_gate_low_or_nonfinite_scores(self) -> None:
+        raw_json_cases = [
             (
                 "incomplete_scan",
-                {
-                    "overall_passed": True,
-                    "overall_status": "passed",
-                    "incomplete_scans": ["skillspector"],
-                    "total_errors": 0,
-                    "total_warnings": 0,
-                    "results": [{"validator": "QUALITY", "quality": {"overall_score": 85.0, "grade": "B"}}],
-                },
+                json.dumps(
+                    {
+                        "overall_passed": True,
+                        "overall_status": "passed",
+                        "incomplete_scans": ["skillspector"],
+                        "total_errors": 0,
+                        "total_warnings": 0,
+                        "results": [{"validator": "QUALITY", "quality": {"overall_score": 85.0, "grade": "B"}}],
+                    }
+                ),
                 0,
             ),
             (
                 "failed_status",
-                {
-                    "overall_passed": False,
-                    "overall_status": "failed",
-                    "incomplete_scans": [],
-                    "total_errors": 1,
-                    "total_warnings": 0,
-                    "results": [{"validator": "QUALITY", "quality": {"overall_score": 85.0, "grade": "B"}}],
-                },
+                json.dumps(
+                    {
+                        "overall_passed": False,
+                        "overall_status": "failed",
+                        "incomplete_scans": [],
+                        "total_errors": 1,
+                        "total_warnings": 0,
+                        "results": [{"validator": "QUALITY", "quality": {"overall_score": 85.0, "grade": "B"}}],
+                    }
+                ),
                 1,
             ),
             (
                 "low_score",
-                {
-                    "overall_passed": True,
-                    "overall_status": "passed",
-                    "incomplete_scans": [],
-                    "total_errors": 0,
-                    "total_warnings": 0,
-                    "results": [{"validator": "QUALITY", "quality": {"overall_score": 65.0, "grade": "D"}}],
-                },
+                json.dumps(
+                    {
+                        "overall_passed": True,
+                        "overall_status": "passed",
+                        "incomplete_scans": [],
+                        "total_errors": 0,
+                        "total_warnings": 0,
+                        "results": [{"validator": "QUALITY", "quality": {"overall_score": 65.0, "grade": "D"}}],
+                    }
+                ),
+                0,
+            ),
+            (
+                "nan_score",
+                '{"overall_passed": true, "overall_status": "passed", "incomplete_scans": [], '
+                '"total_errors": 0, "total_warnings": 0, '
+                '"results": [{"validator": "QUALITY", "quality": {"overall_score": NaN, "grade": "A"}}]}',
+                0,
+            ),
+            (
+                "infinity_score",
+                '{"overall_passed": true, "overall_status": "passed", "incomplete_scans": [], '
+                '"total_errors": 0, "total_warnings": 0, '
+                '"results": [{"validator": "QUALITY", "quality": {"overall_score": Infinity, "grade": "A"}}]}',
+                0,
+            ),
+            (
+                "above_100_score",
+                json.dumps(
+                    {
+                        "overall_passed": True,
+                        "overall_status": "passed",
+                        "incomplete_scans": [],
+                        "total_errors": 0,
+                        "total_warnings": 0,
+                        "results": [{"validator": "QUALITY", "quality": {"overall_score": 105.0, "grade": "A"}}],
+                    }
+                ),
+                0,
+            ),
+            (
+                "negative_score",
+                json.dumps(
+                    {
+                        "overall_passed": True,
+                        "overall_status": "passed",
+                        "incomplete_scans": [],
+                        "total_errors": 0,
+                        "total_warnings": 0,
+                        "results": [{"validator": "QUALITY", "quality": {"overall_score": -1.0, "grade": "F"}}],
+                    }
+                ),
                 0,
             ),
         ]
-        for label, payload, rc in cases:
+        for label, raw_json, rc in raw_json_cases:
             with self.subTest(case=label):
                 fake_bin = self.make_fake_skillevaluator(
                     f"""
-                    import json, pathlib, sys
+                    import pathlib, sys
                     args = sys.argv[1:]
                     out_dir = pathlib.Path(args[args.index("-o") + 1])
                     out_dir.mkdir(parents=True, exist_ok=True)
                     (out_dir / "skillevaluator-tier1.json").write_text(
-                        json.dumps({payload!r}),
+                        {raw_json!r},
                         encoding="utf-8",
                     )
                     sys.exit({rc})
@@ -185,6 +273,14 @@ class SkillScannerRunnerTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertFalse(summary["overall_passed"])
                 self.assertTrue(failures)
+
+        for bad_val in (float("nan"), float("inf"), float("-inf"), -0.1, 100.1, True):
+            self.assertEqual(
+                scanner.extract_quality_score(
+                    {"results": [{"validator": "QUALITY", "quality": {"overall_score": bad_val, "grade": "A"}}]}
+                ),
+                (None, None),
+            )
 
     def test_preflight_rejects_stray_bytecode_and_escaping_symlinks_and_missing_skill_md(self) -> None:
         fake_bin = self.make_fake_skillevaluator("import sys; sys.exit(0)\n")
@@ -248,16 +344,27 @@ class SkillScannerRunnerTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertTrue(any("executable not found" in item for item in failures))
 
-    def test_repository_merge_workflow_and_baseline_contracts(self) -> None:
+    def test_repository_merge_workflow_lockfiles_and_baseline_contracts(self) -> None:
         workflow_path = ROOT / ".github/workflows/skill-merge-scan.yml"
         self.assertTrue(workflow_path.is_file())
-        workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        workflow_text = workflow_path.read_text(encoding="utf-8")
+        self.assertIn("--require-hashes", workflow_text)
+        self.assertIn("--no-deps", workflow_text)
+        workflow = yaml.safe_load(workflow_text)
         triggers = workflow.get("on") or workflow.get(True)
         self.assertIsInstance(triggers, dict)
         self.assertNotIn("pull_request", triggers)
         self.assertNotIn("pull_request_target", triggers)
         self.assertEqual(set(triggers.keys()), {"merge_group", "push", "workflow_dispatch"})
+        self.assertEqual(triggers["merge_group"].get("branches"), ["main"])
         self.assertEqual(triggers["push"].get("branches"), ["main"])
+
+        for lock_name in ("requirements-scanner-pip.txt", "requirements-scanner.txt"):
+            lock_path = ROOT / ".github" / lock_name
+            self.assertTrue(lock_path.is_file())
+            lock_text = lock_path.read_text(encoding="utf-8")
+            self.assertIn("--hash=sha256:", lock_text)
+            self.assertNotIn("skills-local", lock_text)
 
         baseline_path = ROOT / ".github/skillspector-baseline.yaml"
         self.assertTrue(baseline_path.is_file())

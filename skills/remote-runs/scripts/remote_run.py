@@ -693,7 +693,7 @@ def supervise(args, path, config, claim, admission, cancel):
         if args.gpus:
             environment["CUDA_VISIBLE_DEVICES"] = ",".join(
                 admission["gpu"]["devices"][str(index)]["uuid"] for index in args.gpus)
-        worker_args = [sys.executable, str(script), "_worker", "--ready-fd", str(ready_write),
+        worker_args = [sys.executable, "-B", str(script), "_worker", "--ready-fd", str(ready_write),
                        "--gate-fd", str(gate_read), "--cpus", ",".join(map(str, claim["cpus"])), "--", *command]
         try:
             child = subprocess.Popen(worker_args, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,

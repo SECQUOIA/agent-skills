@@ -138,6 +138,32 @@ class MetadataTests(unittest.TestCase):
     def test_repository_public_skills(self):
         self.assertEqual(validator.validate(ROOT / "skills"), [])
 
+    def test_repository_identity_mode_requires_mit_license_and_author(self):
+        self.write_skill(
+            "name: sample-skill\n"
+            "description: Example.\n"
+            "license: MIT\n"
+            "metadata:\n"
+            "  author: David E. Bernal Neira <dbernaln@purdue.edu>"
+        )
+        self.assertEqual(
+            validator.validate(self.root, require_repo_identity=True), []
+        )
+        for missing_or_wrong in (
+            "name: sample-skill\ndescription: Example.",
+            "name: sample-skill\ndescription: Example.\nlicense: Apache-2.0\nmetadata:\n  author: David E. Bernal Neira <dbernaln@purdue.edu>",
+            "name: sample-skill\ndescription: Example.\nlicense: MIT",
+            "name: sample-skill\ndescription: Example.\nlicense: MIT\nmetadata:\n  author: Someone Else <other@example.com>",
+        ):
+            with self.subTest(frontmatter=missing_or_wrong):
+                self.write_skill(missing_or_wrong)
+                self.assertTrue(
+                    validator.validate(self.root, require_repo_identity=True)
+                )
+                self.assertEqual(
+                    validator.validate(self.root, require_repo_identity=False), []
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

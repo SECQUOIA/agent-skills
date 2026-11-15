@@ -11,19 +11,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any
+from typing import Any, NoReturn
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SKILLS_ROOT = REPO_ROOT / "skills"
 DEFAULT_BASELINE = REPO_ROOT / ".github" / "skillspector-baseline.yaml"
 BYTECODE_SUFFIXES = (".pyc", ".pyo")
+
+
+def _reject_nonfinite_json_constant(token: str) -> NoReturn:
+    raise ValueError(f"non-standard JSON numeric constant: {token}")
 
 
 def resolve_scanner_binary(binary: str) -> str | None:
@@ -109,11 +114,11 @@ def extract_quality_score(report: dict[str, Any]) -> tuple[float | None, str | N
         if not isinstance(quality, dict):
             return None, None
         raw_score = quality.get("overall_score")
-        score = (
-            float(raw_score)
-            if isinstance(raw_score, (int, float)) and not isinstance(raw_score, bool)
-            else None
-        )
+        if not isinstance(raw_score, (int, float)) or isinstance(raw_score, bool):
+            return None, None
+        score = float(raw_score)
+        if not math.isfinite(score) or not 0.0 <= score <= 100.0:
+            return None, None
         grade = quality.get("grade")
         return score, grade if isinstance(grade, str) else None
     return None, None
@@ -127,7 +132,7 @@ def evaluate_skill_report(
     stderr: str,
 ) -> tuple[dict[str, Any], list[str]]:
     failures: list[str] = []
-    if not report_path.is_file():
+    if os.path.islink(report_path) or not report_path.is_file():
         detail = stderr.strip() or f"exit code {returncode}"
         return (
             {
@@ -145,8 +150,11 @@ def evaluate_skill_report(
         )
 
     try:
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        report = json.loads(
+            report_path.read_text(encoding="utf-8"),
+            parse_constant=_reject_nonfinite_json_constant,
+        )
+    except (OSError, ValueError) as exc:
         return (
             {
                 "name": skill_name,
@@ -202,7 +210,9 @@ def evaluate_skill_report(
     ):
         failures.append(f"{skill_name}: total_errors={total_errors!r}")
     if quality_score is None:
-        failures.append(f"{skill_name}: missing Quality Score metadata in report")
+        failures.append(
+            f"{skill_name}: missing or out-of-range finite QUALITY score in report"
+        )
     elif quality_score < min_score:
         failures.append(
             f"{skill_name}: quality score {quality_score:.1f} is below min_score {min_score}"
@@ -220,6 +230,15 @@ def evaluate_skill_report(
         "grade": grade,
     }
     return record, failures
+
+
+def _publish_staged_skill_output(staged_dir: Path, destination_dir: Path) -> None:
+    if os.path.islink(destination_dir):
+        destination_dir.unlink()
+    elif destination_dir.exists():
+        shutil.rmtree(destination_dir)
+    if any(staged_dir.iterdir()):
+        shutil.copytree(staged_dir, destination_dir, symlinks=False)
 
 
 def run_scan(
@@ -252,15 +271,26 @@ def run_scan(
         return 1, {}, preflight_errors
 
     resolved_skills_root = skills_root.resolve()
+    resolved_output_dir: Path | None = None
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        resolved_output_dir = output_dir.resolve()
+        summary_file = resolved_output_dir / "summary.json"
+        if summary_file.exists() or os.path.islink(summary_file):
+            summary_file.unlink()
+
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
 
     records: list[dict[str, Any]] = []
     failures: list[str] = []
 
-    def execute_into(base_out: Path) -> None:
+    # Always execute into a fresh temporary directory per invocation so a stale
+    # report in --output-dir can never satisfy validation when a run produces none.
+    with tempfile.TemporaryDirectory(prefix="secquoia-skill-scan-") as tmp:
+        staging_root = Path(tmp)
         for skill_dir in skill_dirs:
-            skill_out = base_out / skill_dir.name
+            skill_out = staging_root / skill_dir.name
             skill_out.mkdir(parents=True, exist_ok=True)
             cmd = [
                 resolved_bin,
@@ -290,15 +320,12 @@ def run_scan(
                 min_score,
                 proc.stderr,
             )
+            if resolved_output_dir is not None:
+                _publish_staged_skill_output(
+                    skill_out, resolved_output_dir / skill_dir.name
+                )
             records.append(record)
             failures.extend(skill_failures)
-
-    if output_dir is not None:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        execute_into(output_dir.resolve())
-    else:
-        with tempfile.TemporaryDirectory(prefix="secquoia-skill-scan-") as tmp:
-            execute_into(Path(tmp))
 
     for offender in find_bytecode_artifacts(resolved_skills_root):
         failures.append(
@@ -313,8 +340,8 @@ def run_scan(
         "skills": records,
         "failures": failures,
     }
-    if output_dir is not None:
-        (output_dir / "summary.json").write_text(
+    if resolved_output_dir is not None:
+        (resolved_output_dir / "summary.json").write_text(
             json.dumps(summary, indent=2) + "\n",
             encoding="utf-8",
         )

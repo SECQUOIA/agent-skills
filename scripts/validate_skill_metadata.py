@@ -19,6 +19,9 @@ import yaml
 
 
 # The supported fields from skill-creator's quick_validate.py, shared by this set.
+REPO_SKILLS_ROOT = Path(__file__).resolve().parents[1] / "skills"
+REQUIRED_REPO_LICENSE = "MIT"
+REQUIRED_REPO_AUTHOR = "David E. Bernal Neira <dbernaln@purdue.edu>"
 FRONTMATTER_KEYS = {"name", "description", "license", "allowed-tools", "metadata"}
 SIDECAR_KEYS = {"interface", "dependencies", "policy"}
 INTERFACE_KEYS = {
@@ -72,7 +75,13 @@ def unknown_keys(value: dict, allowed: set[str], path: Path, errors: list[str]):
         errors.append(f"{path}: unsupported metadata keys: {', '.join(extra)}")
 
 
-def validate_frontmatter(path: Path, text: str, errors: list[str]) -> None:
+def validate_frontmatter(
+    path: Path,
+    text: str,
+    errors: list[str],
+    *,
+    require_repo_identity: bool = False,
+) -> None:
     match = FRONTMATTER.match(text)
     if not match:
         errors.append(f"{path}: missing or malformed YAML frontmatter")
@@ -109,6 +118,16 @@ def validate_frontmatter(path: Path, text: str, errors: list[str]) -> None:
             not isinstance(meta["author"], str) or not meta["author"].strip()
         ):
             errors.append(f"{path}: metadata.author must be a nonempty string")
+    if require_repo_identity:
+        if value.get("license") != REQUIRED_REPO_LICENSE:
+            errors.append(
+                f"{path}: repository skill must declare license: {REQUIRED_REPO_LICENSE}"
+            )
+        meta = value.get("metadata")
+        if not isinstance(meta, dict) or meta.get("author") != REQUIRED_REPO_AUTHOR:
+            errors.append(
+                f"{path}: repository skill must declare metadata.author: {REQUIRED_REPO_AUTHOR}"
+            )
 
 
 def validate_sidecar(path: Path, text: str, errors: list[str]) -> None:
@@ -182,8 +201,10 @@ def validate_links(path: Path, text: str, root: Path, errors: list[str]) -> None
             errors.append(f"{path}: missing local link target: {destination}")
 
 
-def validate(root: Path) -> list[str]:
+def validate(root: Path, *, require_repo_identity: bool | None = None) -> list[str]:
     root = root.resolve()
+    if require_repo_identity is None:
+        require_repo_identity = root == REPO_SKILLS_ROOT.resolve()
     errors = []
     entries = sorted(root.glob("*/SKILL.md"))
     if not entries:
@@ -198,7 +219,12 @@ def validate(root: Path) -> list[str]:
                 continue
             text = path.read_text(encoding="utf-8")
             if path == entry:
-                validate_frontmatter(path, text, errors)
+                validate_frontmatter(
+                    path,
+                    text,
+                    errors,
+                    require_repo_identity=require_repo_identity,
+                )
             validate_links(path, text, root, errors)
         sidecar = entry.parent / "agents/openai.yaml"
         if sidecar.is_file():
@@ -212,9 +238,23 @@ def validate(root: Path) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("skills_root", nargs="?", type=Path,
-                        default=Path(__file__).resolve().parents[1] / "skills")
+                        default=REPO_SKILLS_ROOT)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--require-repo-identity",
+        dest="require_repo_identity",
+        action="store_true",
+        default=None,
+        help="Require SECQUOIA license: MIT and metadata.author fields.",
+    )
+    mode.add_argument(
+        "--generic",
+        dest="require_repo_identity",
+        action="store_false",
+        help="Validate generic skill frontmatter without repository-specific author/license rules.",
+    )
     args = parser.parse_args()
-    errors = validate(args.skills_root)
+    errors = validate(args.skills_root, require_repo_identity=args.require_repo_identity)
     if errors:
         print("\n".join(errors))
         return 1

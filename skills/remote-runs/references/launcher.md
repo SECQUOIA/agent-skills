@@ -27,7 +27,7 @@ are illustrative, not a Dantzig allocation:
 PYTHON=/absolute/verified/python3
 RUNNER=/absolute/trusted/bin/remote_run.py
 STATE=/absolute/persistent/path/compute-claims
-"$PYTHON" "$RUNNER" init --state-dir "$STATE" --memory-budget-mib 16384
+"$PYTHON" -B "$RUNNER" init --state-dir "$STATE" --memory-budget-mib 16384
 ```
 
 The default namespace is private to one Unix account and coordinates that
@@ -35,7 +35,7 @@ account's projects. Cross-user coordination requires a prearranged trusted Unix
 group and common path:
 
 ```bash
-"$PYTHON" "$RUNNER" init --state-dir "$STATE" --memory-budget-mib 16384 \
+"$PYTHON" -B "$RUNNER" init --state-dir "$STATE" --memory-budget-mib 16384 \
   --group trusted-compute-group
 ```
 
@@ -80,7 +80,7 @@ controller dispatches sibling services, use [service-harness integration](servic
 to put the helper inside each allocation; do not replace the experiment logic.
 
 ```bash
-"$PYTHON" "$RUNNER" run --state-dir "$STATE" --cores 4 --threads 1 \
+"$PYTHON" -B "$RUNNER" run --state-dir "$STATE" --cores 4 --threads 1 \
   --memory-mib 8192 --time-limit 7200 --wait 600 \
   --run-dir /absolute/new/run-directory -- \
   /absolute/project/environment/bin/python /absolute/project/run_study.py
@@ -129,9 +129,9 @@ For controllers that drain separately supervised cases, follow
 `stop` on their helper; cancelling its descendant tree can interrupt that drain.
 
 ```bash
-"$PYTHON" "$RUNNER" status --state-dir "$STATE"
-"$PYTHON" "$RUNNER" stop --state-dir "$STATE" --run-id RUN_ID
-"$PYTHON" "$RUNNER" recover --state-dir "$STATE" --run-id RUN_ID
+"$PYTHON" -B "$RUNNER" status --state-dir "$STATE"
+"$PYTHON" -B "$RUNNER" stop --state-dir "$STATE" --run-id RUN_ID
+"$PYTHON" -B "$RUNNER" recover --state-dir "$STATE" --run-id RUN_ID
 ```
 
 The runner becomes a Linux child subreaper and retains the claim until the kernel

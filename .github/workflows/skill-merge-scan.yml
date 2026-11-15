@@ -2,6 +2,7 @@ name: Skill Merge Scanner
 
 on:
   merge_group:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
@@ -25,22 +26,19 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.git_ref || github.ref }}
-      - name: Provision NVIDIA SkillEvaluator and pinned SkillSpector
+      - name: Provision hash-locked NVIDIA SkillEvaluator and SkillSpector
         run: |
           /usr/bin/python3 -m venv "$RUNNER_TEMP/nvidia-scanner"
-          "$RUNNER_TEMP/nvidia-scanner/bin/python" -m pip install --upgrade pip
           "$RUNNER_TEMP/nvidia-scanner/bin/python" -m pip install \
-            "skillevaluator==0.9.0" \
-            "bandit==1.9.4" \
-            "ruff==0.17.5"
-          WHEEL="$RUNNER_TEMP/skillspector-2.13.4-py3-none-any.whl"
-          curl --proto '=https' --tlsv1.2 -fsSL \
-            "https://github.com/NVIDIA/SkillSpector/releases/download/v2.13.4/skillspector-2.13.4-py3-none-any.whl" \
-            -o "$WHEEL"
-          printf '%s  %s\n' \
-            "c5e7f290897c65018013a6e37022fabdd2ba1aeeb4994b65df2de8b0d536bea0" \
-            "$WHEEL" | sha256sum -c -
-          "$RUNNER_TEMP/nvidia-scanner/bin/python" -m pip install "$WHEEL"
+            --disable-pip-version-check \
+            --require-hashes \
+            --no-deps \
+            -r .github/requirements-scanner-pip.txt
+          "$RUNNER_TEMP/nvidia-scanner/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --require-hashes \
+            --no-deps \
+            -r .github/requirements-scanner.txt
       - name: Verify Tier 1 scanner readiness
         run: |
           export PATH="$RUNNER_TEMP/nvidia-scanner/bin:$PATH"

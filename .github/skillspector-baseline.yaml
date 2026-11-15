@@ -74,15 +74,16 @@ fingerprints:
   rule_id: AS1
   file: references/runtime-settings.md
   reason: Reference documentation naming Antigravity's documented skill and hook configuration paths (~/.gemini/config/).
-- hash: sha256:93b761c56004a3412a0404cea419a484f5cb899e7cc77350fc36390ed5aa80f0
+- hash: sha256:c5159804b6ca832f5e2ed946f69e4c462dd58f44c15d904072f8be1e1c2069d0
   rule_id: AST5
   file: scripts/remote_run.py
   reason: Intentional shell-free os.execvpe argv handoff inside the resource-claimed remote_run.py worker
     child.
-- hash: sha256:9126d85d7e7176713aa63056461c7b47d3c1875e08c8b68d16aaf0d32f57786f
+- hash: sha256:e8405a0a28e8aad9570280daa9dba633c6f6875b38c2cda197af2c2d4245d54f
   rule_id: AST4
   file: scripts/remote_run.py
-  reason: shell=False argv-array subprocess.Popen spawning remote_run.py _worker for local process supervision.
+  reason: shell=False argv-array subprocess.Popen spawning python -B remote_run.py _worker for local process
+    supervision.
 - hash: sha256:0b9dd4f6a35167e172850c52373f62d4983152124b9834c83e8dd61061dab2d1
   rule_id: AST4
   file: scripts/resource_probe.py
@@ -92,7 +93,7 @@ fingerprints:
   file: SKILL.md
   reason: allowed-tools is intentionally omitted so remote-runs remains portable across Codex, Claude
     Code, and Antigravity.
-- hash: sha256:c374db8dd8d686fbaa208a6aeabe5074c5ac8e314d2de1b331dcb10271e027be
+- hash: sha256:acd95379ae28b5bfbd6d767d155536446460898884d0c238b386d9256cedddd6
   rule_id: E2
   file: scripts/remote_run.py
   reason: Copies caller os.environ solely to pass inherited environment plus CPU/GPU thread caps to the
@@ -111,7 +112,7 @@ fingerprints:
   rule_id: TM3
   file: references/shared-hosts.md
   reason: Negated security prohibition ('Do not create a world-writable shared service') in shared-hosts.md.
-- hash: sha256:fab3b9653f4d3bb10c3cec01e77962a1558bfcd25e20ffea97b97a957adc2896
+- hash: sha256:9229d80f7d6430e5e8a23c895cd6fcb9417e2e034726932eb1eb68442d2297e0
   rule_id: TM3
   file: scripts/remote_run.py
   reason: Defensive permission check in remote_run.py that rejects sticky or world-writable state directories.
