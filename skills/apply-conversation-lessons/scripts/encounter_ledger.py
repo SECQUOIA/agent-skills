@@ -503,14 +503,19 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
             ON remote_write_observations(observed_at);
         """)
     with _write_transaction(connection):
-        for table in ("encounters", "encounter_observations"):
-            columns = {
-                row["name"] for row in connection.execute(f"PRAGMA table_info({table})")
-            }
+        for pragma_sql, alter_sql in (
+            (
+                "PRAGMA table_info(encounters)",
+                "ALTER TABLE encounters ADD COLUMN target_resolution TEXT NOT NULL DEFAULT 'legacy'",
+            ),
+            (
+                "PRAGMA table_info(encounter_observations)",
+                "ALTER TABLE encounter_observations ADD COLUMN target_resolution TEXT NOT NULL DEFAULT 'legacy'",
+            ),
+        ):
+            columns = {row["name"] for row in connection.execute(pragma_sql)}
             if "target_resolution" not in columns:
-                connection.execute(
-                    f"ALTER TABLE {table} ADD COLUMN target_resolution TEXT NOT NULL DEFAULT 'legacy'"
-                )
+                connection.execute(alter_sql)
         activity_columns = {
             str(row["name"])
             for row in connection.execute("PRAGMA table_info(hook_activity)").fetchall()

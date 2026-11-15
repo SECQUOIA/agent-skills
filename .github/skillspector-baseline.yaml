@@ -5,15 +5,15 @@
 version: 2
 scanner_version: 2.13.4
 fingerprints:
-- hash: sha256:4a7bf25e4f6364e5417b1ac130a062d20c4c502c55eb8059e7d0266ed13d7245
+- hash: sha256:62d09d366280952b1c2d1dde3f39e846af208143a625aeccdc7ff426d5014c13
   rule_id: AST4
   file: scripts/encounter_ledger.py
   reason: shell=False fixed-argument git rev-parse HEAD lookup on a local repository ancestor directory.
-- hash: sha256:6f11208cdf7c2645aab57ccbceb6a0f6743504e5a5418aa79dcbd0d1d705d000
+- hash: sha256:e6fd948ba36e03edc6dcca4b003677c17a368fa04300c410389c09a8454c0319
   rule_id: AST4
   file: scripts/encounter_ledger.py
   reason: shell=False fixed-argument git config remote.origin.url lookup with a 2-second timeout.
-- hash: sha256:bef9184150e48663b710af934b6f45ae1a575a2fb57a5bc4b2965e138f7b72a2
+- hash: sha256:76ac1fc85f2de9e76dba67af65f283045b08753c004811b6f1ddcd741eacdffe
   rule_id: AST7
   file: scripts/encounter_ledger.py
   reason: getattr(args, field, None) reads parsed CLI Namespace attributes restricted to the constant
@@ -26,7 +26,7 @@ fingerprints:
   rule_id: AST4
   file: scripts/plan_integration.py
   reason: shell=False git merge-base --is-ancestor check in plan_integration.py.
-- hash: sha256:fe7ec4aecc14ddf555327c0befaa7eb39d183f9ee0f4f7d46ad59212156e0553
+- hash: sha256:c32f7e2934688eb801cd9b2fc5511d55d7a1adbf0e86a95e468d9c9537d6291d
   rule_id: TT2
   file: scripts/encounter_ledger.py
   reason: Copies the local SQLite encounter ledger into a private temporary snapshot directory for consistent
@@ -46,7 +46,7 @@ fingerprints:
   file: agents/openai.yaml
   reason: OpenAI sidecar prompt describes explicit user-invoked skill maintenance rather than autonomous
     runtime self-modification.
-- hash: sha256:70765d41ee2aa64a36d56ef12f5097332e634c7ee54a305a53b6e6fa7e61097b
+- hash: sha256:842b5e433c718ef3f58a2748b660cab201136eaa8ac2cff3b406a99d9261b84b
   rule_id: P6
   file: scripts/encounter_ledger.py
   reason: CLI argparse help text ('show rules eligible for lessons review') refers to workflow encounter
