@@ -129,6 +129,36 @@ class SkillScannerRunnerTests(unittest.TestCase):
         self.assertEqual(len(failures), 2)
         self.assertFalse((out_dir / "alpha-skill" / "skillevaluator-tier1.json").exists())
 
+    def test_output_dir_overlapping_source_or_non_scanner_files_is_rejected_without_deletion(self) -> None:
+        noop_bin = self.make_fake_skillevaluator("import sys; sys.exit(0)\n")
+        foreign_dir = self.base / "foreign-data"
+        foreign_dir.mkdir()
+        precious = foreign_dir / "notes.txt"
+        precious.write_text("keep me\n", encoding="utf-8")
+
+        for bad_out in (
+            self.skills_root,
+            self.skills_root / "alpha-skill",
+            self.base,
+            foreign_dir,
+            scanner.REPO_ROOT,
+            scanner.REPO_ROOT / "scripts",
+        ):
+            with self.subTest(output_dir=str(bad_out)):
+                code, summary, failures = scanner.run_scan(
+                    self.skills_root,
+                    baseline=self.baseline,
+                    min_score=70,
+                    skillevaluator_bin=str(noop_bin),
+                    output_dir=bad_out,
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(summary, {})
+                self.assertTrue(failures)
+                self.assertTrue((self.skills_root / "alpha-skill" / "SKILL.md").is_file())
+                self.assertTrue((self.skills_root / "beta-skill" / "SKILL.md").is_file())
+                self.assertEqual(precious.read_text(encoding="utf-8"), "keep me\n")
+
     def test_no_baseline_omits_baseline_flag(self) -> None:
         fake_bin = self.make_fake_skillevaluator(
             """

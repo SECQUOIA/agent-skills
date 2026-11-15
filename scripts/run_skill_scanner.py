@@ -232,13 +232,115 @@ def evaluate_skill_report(
     return record, failures
 
 
+def validate_output_dir(
+    output_dir: Path,
+    resolved_skills_root: Path,
+    resolved_baseline: Path | None,
+) -> tuple[Path | None, list[str]]:
+    if os.path.islink(output_dir):
+        return None, [f"{output_dir}: --output-dir cannot be a symlink"]
+    resolved_out = output_dir.expanduser().resolve()
+    if resolved_out.exists() and not resolved_out.is_dir():
+        return None, [f"{resolved_out}: --output-dir exists and is not a directory"]
+
+    if (
+        resolved_out == resolved_skills_root
+        or resolved_out.is_relative_to(resolved_skills_root)
+        or resolved_skills_root.is_relative_to(resolved_out)
+    ):
+        return (
+            None,
+            [
+                f"{resolved_out}: --output-dir cannot overlap skills root {resolved_skills_root}"
+            ],
+        )
+
+    if resolved_out == REPO_ROOT or REPO_ROOT.is_relative_to(resolved_out):
+        return (
+            None,
+            [f"{resolved_out}: --output-dir cannot be repository root or its ancestor"],
+        )
+
+    protected_roots = [
+        REPO_ROOT / ".git",
+        REPO_ROOT / ".github",
+        REPO_ROOT / "scripts",
+        REPO_ROOT / "tests",
+        REPO_ROOT / "evals",
+        REPO_ROOT / "skills-local",
+    ]
+    for protected in protected_roots:
+        resolved_protected = protected.resolve()
+        if (
+            resolved_out == resolved_protected
+            or resolved_out.is_relative_to(resolved_protected)
+            or resolved_protected.is_relative_to(resolved_out)
+        ):
+            return (
+                None,
+                [f"{resolved_out}: --output-dir overlaps protected path {resolved_protected}"],
+            )
+
+    if resolved_baseline is not None and (
+        resolved_out == resolved_baseline
+        or resolved_baseline.is_relative_to(resolved_out)
+    ):
+        return (
+            None,
+            [f"{resolved_out}: --output-dir overlaps baseline {resolved_baseline}"],
+        )
+
+    if resolved_out.exists():
+        for entry in sorted(resolved_out.iterdir()):
+            if os.path.islink(entry):
+                return (
+                    None,
+                    [f"{entry}: --output-dir contains unexpected symlink"],
+                )
+            if entry.is_file():
+                if entry.name != "summary.json":
+                    return (
+                        None,
+                        [
+                            f"{entry}: --output-dir contains non-scanner file; choose an empty or dedicated report directory"
+                        ],
+                    )
+                continue
+            if entry.is_dir():
+                for child in sorted(entry.iterdir()):
+                    if (
+                        os.path.islink(child)
+                        or not child.is_file()
+                        or child.name != "skillevaluator-tier1.json"
+                    ):
+                        return (
+                            None,
+                            [
+                                f"{child}: --output-dir contains non-scanner entry; refusing to modify existing directory"
+                            ],
+                        )
+                continue
+            return None, [f"{entry}: --output-dir contains unsupported filesystem entry"]
+
+    return resolved_out, []
+
+
 def _publish_staged_skill_output(staged_dir: Path, destination_dir: Path) -> None:
-    if os.path.islink(destination_dir):
-        destination_dir.unlink()
-    elif destination_dir.exists():
-        shutil.rmtree(destination_dir)
-    if any(staged_dir.iterdir()):
-        shutil.copytree(staged_dir, destination_dir, symlinks=False)
+    prior_report = destination_dir / "skillevaluator-tier1.json"
+    if prior_report.is_file() and not os.path.islink(prior_report):
+        prior_report.unlink()
+    staged_files = [
+        item
+        for item in sorted(staged_dir.iterdir())
+        if item.is_file() and not os.path.islink(item)
+    ]
+    if not staged_files:
+        if destination_dir.is_dir() and not any(destination_dir.iterdir()):
+            destination_dir.rmdir()
+        return
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    for item in staged_files:
+        shutil.copy2(item, destination_dir / item.name)
 
 
 def run_scan(
@@ -273,10 +375,15 @@ def run_scan(
     resolved_skills_root = skills_root.resolve()
     resolved_output_dir: Path | None = None
     if output_dir is not None:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        resolved_output_dir = output_dir.resolve()
+        resolved_output_dir, out_errors = validate_output_dir(
+            output_dir, resolved_skills_root, resolved_baseline
+        )
+        if out_errors:
+            return 1, {}, out_errors
+        assert resolved_output_dir is not None
+        resolved_output_dir.mkdir(parents=True, exist_ok=True)
         summary_file = resolved_output_dir / "summary.json"
-        if summary_file.exists() or os.path.islink(summary_file):
+        if summary_file.is_file() and not os.path.islink(summary_file):
             summary_file.unlink()
 
     env = dict(os.environ)
