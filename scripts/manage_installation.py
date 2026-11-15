@@ -14,6 +14,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,7 @@ from pathlib import Path
 
 MARKER = ".secquoia-install.json"
 INSTALLATION_ID = "secquoia-agent-skills"
+HOOK_INSTALLATION_ID = "secquoia-encounter-ledger"
 IGNORED = {MARKER, ".installed-revision", "__pycache__", ".DS_Store"}
 
 
@@ -268,8 +270,14 @@ def run_hooks(
                 ]
             )
     else:
+        default_mode = getattr(args, "hooks", None)
+        codex_mode = args.codex_hooks or default_mode
+        claude_mode = args.claude_hooks or default_mode
+        antigravity_mode = getattr(args, "antigravity_hooks", None) or (
+            default_mode if antigravity_skills else None
+        )
         commands = []
-        if args.codex_hooks:
+        if codex_mode:
             script = codex_skills / relative
             commands.append(
                 [
@@ -280,10 +288,10 @@ def run_hooks(
                     "--script",
                     str(script),
                     "--mode",
-                    args.codex_hooks,
+                    codex_mode,
                 ]
             )
-        if args.claude_hooks:
+        if claude_mode:
             script = claude_home / "skills" / relative
             commands.append(
                 [
@@ -294,10 +302,10 @@ def run_hooks(
                     "--script",
                     str(script),
                     "--mode",
-                    args.claude_hooks,
+                    claude_mode,
                 ]
             )
-        if getattr(args, "antigravity_hooks", None) and antigravity_skills:
+        if antigravity_mode and antigravity_skills and antigravity_home is not None:
             script = antigravity_skills / relative
             commands.append(
                 [
@@ -308,12 +316,111 @@ def run_hooks(
                     "--script",
                     str(script),
                     "--mode",
-                    args.antigravity_hooks,
+                    antigravity_mode,
                 ]
             )
     if source_script.is_file():
         for command in commands:
             subprocess.run([sys.executable, *command], check=True)
+
+
+def _extract_mode_from_command(command: str) -> str | None:
+    if HOOK_INSTALLATION_ID not in command:
+        return None
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return "configured"
+    for index, token in enumerate(tokens):
+        if token == "--mode" and index + 1 < len(tokens):
+            return tokens[index + 1]
+        if token.startswith("--mode="):
+            return token.split("=", 1)[1]
+    return "configured"
+
+
+def installed_hook_mode(path: Path, *, antigravity: bool = False) -> str | None:
+    if not path.is_file():
+        return None
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(document, dict):
+        return None
+    modes: set[str] = set()
+    if antigravity:
+        for spec in document.values():
+            if not isinstance(spec, dict) or spec.get("enabled") is False:
+                continue
+            for items in spec.values():
+                if not isinstance(items, list):
+                    continue
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    handlers = item.get("hooks") if isinstance(item.get("hooks"), list) else [item]
+                    for handler in handlers:
+                        if isinstance(handler, dict) and isinstance(handler.get("command"), str):
+                            mode = _extract_mode_from_command(handler["command"])
+                            if mode:
+                                modes.add(mode)
+    else:
+        hooks = document.get("hooks")
+        if isinstance(hooks, dict):
+            for groups in hooks.values():
+                if not isinstance(groups, list):
+                    continue
+                for group in groups:
+                    if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                        continue
+                    for handler in group["hooks"]:
+                        if isinstance(handler, dict) and isinstance(handler.get("command"), str):
+                            mode = _extract_mode_from_command(handler["command"])
+                            if mode:
+                                modes.add(mode)
+    if not modes:
+        return None
+    return next(iter(modes)) if len(modes) == 1 else "/".join(sorted(modes))
+
+
+def report_hook_parity(
+    codex_home: Path, claude_home: Path, antigravity_home: Path | None
+) -> None:
+    targets: list[tuple[str, Path, bool]] = [
+        ("Codex", codex_home / "hooks.json", False),
+        ("Claude", claude_home / "settings.json", False),
+    ]
+    if antigravity_home is not None:
+        targets.append(("Antigravity", antigravity_home / "hooks.json", True))
+    states = [
+        (name, path, installed_hook_mode(path, antigravity=is_agy))
+        for name, path, is_agy in targets
+    ]
+    configured = [(name, mode) for name, _, mode in states if mode is not None]
+    if not configured:
+        return
+    missing = [(name, path) for name, path, mode in states if mode is None]
+    distinct_modes = {mode for _, mode in configured}
+    if not missing and len(distinct_modes) == 1:
+        return
+    configured_text = ", ".join(f"{name} ({mode})" for name, mode in configured)
+    if missing:
+        missing_text = ", ".join(f"{name} ({path})" for name, path in missing)
+        suggested_mode = next(iter(distinct_modes)) if len(distinct_modes) == 1 else "audit"
+        flag_arg = (
+            f"--hooks={suggested_mode}"
+            if suggested_mode in {"audit", "enforce"}
+            else "--hooks"
+        )
+        print(
+            f"Hook parity note: SECQUOIA encounter hooks are configured for {configured_text}"
+            f" but missing for {missing_text}. Run ./install.sh {flag_arg} to align all active clients."
+        )
+    elif len(distinct_modes) > 1:
+        print(
+            f"Hook parity note: SECQUOIA encounter hooks use mixed modes across clients: {configured_text}."
+        )
 
 
 def install(
@@ -393,6 +500,13 @@ def main(argv: list[str] | None = None) -> int:
         help="explicit Codex discovery root; no automatic migration",
     )
     parser.add_argument(
+        "--hooks",
+        nargs="?",
+        const="audit",
+        choices=("audit", "enforce"),
+        help="install encounter hooks across all active clients (audit or enforce)",
+    )
+    parser.add_argument(
         "--codex-hooks", nargs="?", const="audit", choices=("audit", "enforce")
     )
     parser.add_argument(
@@ -463,10 +577,15 @@ def main(argv: list[str] | None = None) -> int:
                 f"Done. Start a fresh {'/'.join(clients)} session to discover"
                 " the installed skills."
             )
-            if args.codex_hooks:
+            if args.codex_hooks or args.hooks:
                 print(
                     "In Codex, open /hooks to review and trust the installed hook definition."
                 )
+            report_hook_parity(
+                codex_home,
+                claude_home,
+                antigravity_home if include_antigravity else None,
+            )
         else:
             selected = args.codex_skills_dir or user_home / ".agents" / "skills"
             antigravity_skills = (

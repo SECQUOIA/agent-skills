@@ -417,6 +417,29 @@ class InstallationTests(unittest.TestCase):
         for root in (self.modern, self.claude):
             self.assertFalse((root / "private-skill").exists())
 
+    def test_unified_hooks_flag_and_hook_parity_notice(self):
+        # 1. Partial hook install followed by Antigravity discovery warns without mutating hooks.json
+        self.run_script("install", "--codex-hooks", "--claude-hooks")
+        (self.home / ".gemini").mkdir(parents=True)
+        drift = self.run_script("install")
+        self.assertIn("Hook parity note:", drift.stdout)
+        self.assertIn("Antigravity", drift.stdout)
+        self.assertIn("--hooks=audit", drift.stdout)
+        self.assertFalse((self.home / ".gemini/config/hooks.json").exists())
+
+        # 2. --hooks aligns all active clients (Codex, Claude, Antigravity) and clears drift warning
+        aligned = self.run_script("install", "--hooks")
+        self.assertNotIn("Hook parity note:", aligned.stdout)
+        self.assertTrue((self.home / ".gemini/config/hooks.json").is_file())
+        agy_doc = json.loads((self.home / ".gemini/config/hooks.json").read_text())
+        self.assertIn("--mode audit", agy_doc["secquoia-hooks"]["PreToolUse"][0]["hooks"][0]["command"])
+
+        # 3. Client-specific hook flag overrides --hooks and reports mixed-mode parity note
+        mixed = self.run_script("install", "--hooks=audit", "--claude-hooks=enforce")
+        self.assertIn("mixed modes across clients", mixed.stdout)
+        claude_cmds = [h["command"] for h in self.hooks(self.home / ".claude/settings.json")]
+        self.assertTrue(all("--mode enforce" in c for c in claude_cmds))
+
 
 if __name__ == "__main__":
     unittest.main()
