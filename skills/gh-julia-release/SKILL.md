@@ -1,6 +1,9 @@
 ---
 name: gh-julia-release
 description: Publish a Julia package release through its documented General or URL-only workflow, then verify the exact Pkg.add install path. Use for explicit release, registration, or tagging requests.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # Publish a Julia release

@@ -1,0 +1,122 @@
+# Evidence-bound SkillSpector v2 baseline for SECQUOIA public skills.
+# Each entry hashes (scanner_version, component path, file SHA-256, finding)
+# so any edit to a baselined file automatically invalidates its suppression.
+# Never add wildcard rules or private untracked skill paths to this file.
+version: 2
+scanner_version: 2.13.4
+fingerprints:
+- hash: sha256:4a7bf25e4f6364e5417b1ac130a062d20c4c502c55eb8059e7d0266ed13d7245
+  rule_id: AST4
+  file: scripts/encounter_ledger.py
+  reason: shell=False fixed-argument git rev-parse HEAD lookup on a local repository ancestor directory.
+- hash: sha256:6f11208cdf7c2645aab57ccbceb6a0f6743504e5a5418aa79dcbd0d1d705d000
+  rule_id: AST4
+  file: scripts/encounter_ledger.py
+  reason: shell=False fixed-argument git config remote.origin.url lookup with a 2-second timeout.
+- hash: sha256:bef9184150e48663b710af934b6f45ae1a575a2fb57a5bc4b2965e138f7b72a2
+  rule_id: AST7
+  file: scripts/encounter_ledger.py
+  reason: getattr(args, field, None) reads parsed CLI Namespace attributes restricted to the constant
+    RUNTIME_FIELDS tuple.
+- hash: sha256:f9bc52b4a0a563f660db2e65a4f44f165e80bc86f925fecd6b20532aa528f4d5
+  rule_id: AST4
+  file: scripts/plan_integration.py
+  reason: shell=False read-only git --no-optional-locks inspection helper in plan_integration.py.
+- hash: sha256:b048d5e485f6db6e86f51a40f2bc599ce49ce98cdf654a9ce2e8f55b9c889b5c
+  rule_id: AST4
+  file: scripts/plan_integration.py
+  reason: shell=False git merge-base --is-ancestor check in plan_integration.py.
+- hash: sha256:fe7ec4aecc14ddf555327c0befaa7eb39d183f9ee0f4f7d46ad59212156e0553
+  rule_id: TT2
+  file: scripts/encounter_ledger.py
+  reason: Copies the local SQLite encounter ledger into a private temporary snapshot directory for consistent
+    read-only reporting.
+- hash: sha256:66d33964b19a068f338e321c42928b440481a1f50270901f088f2b2d42efc5cb
+  rule_id: LP3
+  file: SKILL.md
+  reason: allowed-tools is intentionally omitted so shared SECQUOIA skills remain portable across Codex,
+    Claude Code, and Antigravity.
+- hash: sha256:b0bcdf28e8ef59074331e45e59c88369af5030c7bf82e7eeeb3348407123570a
+  rule_id: AS3
+  file: SKILL.md
+  reason: apply-conversation-lessons is an explicit user-invoked meta-skill whose documented role is maintaining
+    managed skill files.
+- hash: sha256:1f331bad899ea7c30acffd12f618c13631f46578bfbb77b52b928490c0c36f54
+  rule_id: RA1
+  file: agents/openai.yaml
+  reason: OpenAI sidecar prompt describes explicit user-invoked skill maintenance rather than autonomous
+    runtime self-modification.
+- hash: sha256:70765d41ee2aa64a36d56ef12f5097332e634c7ee54a305a53b6e6fa7e61097b
+  rule_id: P6
+  file: scripts/encounter_ledger.py
+  reason: CLI argparse help text ('show rules eligible for lessons review') refers to workflow encounter
+    rules, not system prompts.
+- hash: sha256:86d4574b221ff344c07e95d3300849c992c04373250e0d8c5edfe3e7a3885a8f
+  rule_id: EA1
+  file: references/issue-scope.md
+  reason: Negated security guardrail warning that author association is not permission to run arbitrary
+    code.
+- hash: sha256:12523c358405a913b45b275baec339592bf4200822e38d2d601bee17826c1695
+  rule_id: EA2
+  file: SKILL.md
+  reason: Negated verification guardrail forbidding claims of deployment or alert resolution without checking
+    outcomes.
+- hash: sha256:51ec81415f88c7d66547a687d89cadfa5e6e862994e157165458d22e3e29d544
+  rule_id: EA4
+  file: references/post-merge.md
+  reason: Negated resource guardrail instructing agents not to loop indefinitely when CI remains pending.
+- hash: sha256:6dcd5ef349c380f8f23eb105afad20401fccdc48ca8b3723172f9aadf91c2ea9
+  rule_id: LP3
+  file: SKILL.md
+  reason: allowed-tools is intentionally omitted so shared workflow conventions remain portable across
+    Codex, Claude Code, and Antigravity.
+- hash: sha256:b42b70fd6c8b0aa564a23851e74e5b6ac1b575acc246cf673593b1cce88e894e
+  rule_id: AS1
+  file: references/runtime-settings.md
+  reason: Reference documentation naming Antigravity's documented skill and hook configuration paths (~/.gemini/config/).
+- hash: sha256:c5159804b6ca832f5e2ed946f69e4c462dd58f44c15d904072f8be1e1c2069d0
+  rule_id: AST5
+  file: scripts/remote_run.py
+  reason: Intentional shell-free os.execvpe argv handoff inside the resource-claimed remote_run.py worker
+    child.
+- hash: sha256:e8405a0a28e8aad9570280daa9dba633c6f6875b38c2cda197af2c2d4245d54f
+  rule_id: AST4
+  file: scripts/remote_run.py
+  reason: shell=False argv-array subprocess.Popen spawning python -B remote_run.py _worker for local process
+    supervision.
+- hash: sha256:0b9dd4f6a35167e172850c52373f62d4983152124b9834c83e8dd61061dab2d1
+  rule_id: AST4
+  file: scripts/resource_probe.py
+  reason: shell=False fixed-argument nvidia-smi telemetry query in resource_probe.py.
+- hash: sha256:78a0a85fe265a5eb159f8543698d91f2fbc926a945ab92fe46faa99c360de93a
+  rule_id: LP3
+  file: SKILL.md
+  reason: allowed-tools is intentionally omitted so remote-runs remains portable across Codex, Claude
+    Code, and Antigravity.
+- hash: sha256:acd95379ae28b5bfbd6d767d155536446460898884d0c238b386d9256cedddd6
+  rule_id: E2
+  file: scripts/remote_run.py
+  reason: Copies caller os.environ solely to pass inherited environment plus CPU/GPU thread caps to the
+    local child experiment.
+- hash: sha256:1df8c407f4f1162ba20c381fb20a4961cc33c9c2e71a3eea16003dbca8d3d574
+  rule_id: EA2
+  file: SKILL.md
+  reason: Scoped campaign workflow guidance that forbids unrequested launches while avoiding redundant
+    prompts within an already-authorized run.
+- hash: sha256:38dcb00aa0333a403ff6ee2092da76d4fb25af1c3dda3a88eb081b74b5398b4a
+  rule_id: RA2
+  file: references/dantzig.md
+  reason: Shared-host lock namespace coordination guidance ('do not create a fresh namespace per run'),
+    not unauthorized persistence.
+- hash: sha256:292edfec90ba0f8cd2c2886847627ebeee88f27e7a1cba7eb9d0ef22ab3b4d4d
+  rule_id: TM3
+  file: references/shared-hosts.md
+  reason: Negated security prohibition ('Do not create a world-writable shared service') in shared-hosts.md.
+- hash: sha256:9229d80f7d6430e5e8a23c895cd6fcb9417e2e034726932eb1eb68442d2297e0
+  rule_id: TM3
+  file: scripts/remote_run.py
+  reason: Defensive permission check in remote_run.py that rejects sticky or world-writable state directories.
+- hash: sha256:711dbb87734bd457fd500a126fae3b2229beb8852f16cb4925f1266e1dd00460
+  rule_id: RA1
+  file: references/branch-sync.md
+  reason: Phrase 'pre-update skill directory set' in explicit user-invoked repository sync instructions.

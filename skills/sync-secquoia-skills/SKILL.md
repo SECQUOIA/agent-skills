@@ -1,6 +1,9 @@
 ---
 name: sync-secquoia-skills
 description: Sync merged shared skills into the local managed clone, preserving pending learnings and refreshing installed skills. Does not push or publish.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # Sync Skills
@@ -31,6 +34,9 @@ selection rather than assuming one client-specific directory.
   do not partially reinstall by hand.
 - Do not install or change lifecycle-hook configuration without a separate request.
   Updating a symlinked runner changes its implementation without changing hooks.
+  Check owned lifecycle-hook parity across the user's installed agent roots
+  (`Codex`, `Claude`, `Antigravity`) and report any missing client or mode
+  mismatch so a partial opt-in does not go unnoticed.
 - For private local skills, check link parity across the user's installed agent
   roots. Create missing links only to the existing ignored source and remove only
   its dangling links. Never copy private contents into tracked/shared directories
@@ -44,7 +50,8 @@ does not need another approval.
 
 Report repository/branch, old-to-new default ref and local HEAD separately, retained
 unique patches and skipped upstream equivalents, backup ref (or why unnecessary),
-and replay result. State skills added/removed/changed and installed roots refreshed.
+and replay result. State skills added/removed/changed, installed roots refreshed,
+and any lifecycle-hook parity gaps across installed clients.
 Count pending learnings against the refreshed default branch; distinguish a stale
 personal tracking remote. Backups remain local and unpushed. If discovery has not
 refreshed in the user's client, recommend a fresh session.

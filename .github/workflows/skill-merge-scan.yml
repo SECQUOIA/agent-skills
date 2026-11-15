@@ -1,0 +1,50 @@
+name: Skill Merge Scanner
+
+on:
+  merge_group:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: "Optional branch, tag, or commit SHA to scan before merging"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  nvidia-skill-scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.git_ref || github.ref }}
+      - name: Provision hash-locked NVIDIA SkillEvaluator and SkillSpector
+        run: |
+          /usr/bin/python3 -m venv "$RUNNER_TEMP/nvidia-scanner"
+          "$RUNNER_TEMP/nvidia-scanner/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --require-hashes \
+            --no-deps \
+            -r .github/requirements-scanner-pip.txt
+          "$RUNNER_TEMP/nvidia-scanner/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --require-hashes \
+            --no-deps \
+            -r .github/requirements-scanner.txt
+      - name: Verify Tier 1 scanner readiness
+        run: |
+          export PATH="$RUNNER_TEMP/nvidia-scanner/bin:$PATH"
+          skillevaluator doctor --tier 1
+      - name: Run merge-time NVIDIA skill scan across public skills
+        run: |
+          export PATH="$RUNNER_TEMP/nvidia-scanner/bin:$PATH"
+          "$RUNNER_TEMP/nvidia-scanner/bin/python" -B scripts/run_skill_scanner.py \
+            --output-dir "$RUNNER_TEMP/skill-scan-reports"

@@ -27,7 +27,7 @@ are illustrative, not a Dantzig allocation:
 PYTHON=/absolute/verified/python3
 RUNNER=/absolute/trusted/bin/remote_run.py
 STATE=/absolute/persistent/path/compute-claims
-"$PYTHON" "$RUNNER" init --state-dir "$STATE" --memory-budget-mib 16384
+"$PYTHON" -B "$RUNNER" init --state-dir "$STATE" --memory-budget-mib 16384
 ```
 
 The default namespace is private to one Unix account and coordinates that
@@ -35,7 +35,7 @@ account's projects. Cross-user coordination requires a prearranged trusted Unix
 group and common path:
 
 ```bash
-"$PYTHON" "$RUNNER" init --state-dir "$STATE" --memory-budget-mib 16384 \
+"$PYTHON" -B "$RUNNER" init --state-dir "$STATE" --memory-budget-mib 16384 \
   --group trusted-compute-group
 ```
 
@@ -48,6 +48,30 @@ erase reservations. Never remove/recreate the admission lock or delete a claim
 because its recorded PID is dead. Group members are trusted participants, not
 security-isolated tenants.
 
+## Changing an existing budget
+
+A namespace budget or deployment-profile change affects every participating
+project. Reuse an established reconfiguration procedure when available. Otherwise,
+pause new admissions and wait for active claims, queued helpers and studies bound
+to the old configuration to become quiescent. Empty claims alone are insufficient:
+helpers can cache configuration while waiting, and a study may verify its frozen
+configuration hash before each solve. Do not stop unrelated work to create this
+maintenance window or rewrite its frozen source/profile.
+
+With the approved budget and maintenance window established, hold the existing
+admission gate, retain its inode and ownership/permissions, and preserve the old
+configuration and hashes. Replace configuration/profile files atomically; truncating
+them under the gate is unsafe because readers can load them before taking the lock.
+Preserve claims and finished-run records. Verify the updated profile/namespace
+binding and record before/after hashes before reopening admissions. Rollback needs
+the same coordination once consumers may have loaded the new configuration.
+
+The bundled helper revalidates its configuration under the gate on every admission
+attempt and refuses a changed configuration before creating a claim. Verify the
+new configuration before making a fresh invocation; do not treat this refusal as
+a scientific attempt. Older deployed helper versions may retain stale budgets;
+this check does not replace the maintenance window or protect hash-bound studies.
+
 ## Run a project command
 
 Keep the project's cases, seeds, solver settings, limits and evidence procedures.
@@ -56,7 +80,7 @@ controller dispatches sibling services, use [service-harness integration](servic
 to put the helper inside each allocation; do not replace the experiment logic.
 
 ```bash
-"$PYTHON" "$RUNNER" run --state-dir "$STATE" --cores 4 --threads 1 \
+"$PYTHON" -B "$RUNNER" run --state-dir "$STATE" --cores 4 --threads 1 \
   --memory-mib 8192 --time-limit 7200 --wait 600 \
   --run-dir /absolute/new/run-directory -- \
   /absolute/project/environment/bin/python /absolute/project/run_study.py
@@ -100,10 +124,14 @@ full argument lists and environment dumps.
 
 ## Status, cancellation and recovery
 
+For controllers that drain separately supervised cases, follow
+[service-harness shutdown](service-harnesses.md#clocks-and-shutdown) before using
+`stop` on their helper; cancelling its descendant tree can interrupt that drain.
+
 ```bash
-"$PYTHON" "$RUNNER" status --state-dir "$STATE"
-"$PYTHON" "$RUNNER" stop --state-dir "$STATE" --run-id RUN_ID
-"$PYTHON" "$RUNNER" recover --state-dir "$STATE" --run-id RUN_ID
+"$PYTHON" -B "$RUNNER" status --state-dir "$STATE"
+"$PYTHON" -B "$RUNNER" stop --state-dir "$STATE" --run-id RUN_ID
+"$PYTHON" -B "$RUNNER" recover --state-dir "$STATE" --run-id RUN_ID
 ```
 
 The runner becomes a Linux child subreaper and retains the claim until the kernel

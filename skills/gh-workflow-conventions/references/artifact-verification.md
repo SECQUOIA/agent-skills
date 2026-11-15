@@ -51,6 +51,20 @@ the installed artifact. Report the runtimes actually checked and any gaps before
 publishing or claiming release readiness. Prefer a project CI guard for this
 contract when packaging is the defect being fixed.
 
+## Recipient-specific deliveries
+
+For a delivery inventory, start from aggregate manifests or scoped summaries.
+Avoid printing recipient-identifying filenames or records into tool logs when
+summary evidence suffices. Read the selected private mapping or files needed for
+identity checks and report only the necessary findings.
+
+Verify personalized output sets against an authoritative recipient-to-record or
+page-range mapping rather than inferring identity from ordering. Check that each
+recipient receives only their intended material and approved common content,
+including embedded or otherwise nonvisible content. Extract final archives and
+check the receiving service's matching filenames and paths; keep staff-only identity
+maps and audit records outside recipient bundles.
+
 ## Manuscript submission archives
 
 For manuscript source uploads, extract each delivered archive outside the checkout
@@ -72,6 +86,15 @@ ongoing maintenance. Pin historical and maintained revisions separately when bot
 are supplied. If the exact paper-producing revision or environment is unrecorded,
 disclose that gap rather than labeling a plausible historical checkout as the
 verified producing revision.
+
+A rebuilt dataset can preserve every input model while changing solutions,
+histories, bounds or status annotations. Before promoting it as a compatible
+default or using it to refresh manuscript counts, reconcile the result populations
+needed by that claim; verifying the new archive's checksum and matching input
+model identities or counts alone is insufficient. Disclose missing or changed
+evidence and preserve exact-version access to prior snapshots still needed for
+experiments. Keep manuscript outputs tied to their producing dataset; do not
+silently pool historical results into the replacement.
 
 When copied configuration or dependency manifests are evidence rather than
 active project inputs, store them under inert filenames or an archive wrapper

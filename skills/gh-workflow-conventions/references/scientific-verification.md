@@ -1,9 +1,9 @@
 # Scientific and Numerical Verification
 
-Use for changed scientific contracts, manuscript/formal-proof claims, reported
-quantitative results, solver claims, and requested benchmark work. Scope the audit
-to changed claims, equations, and relevant call paths; generic code changes do not
-require a scientific audit.
+Use for changed scientific contracts, manuscript/formal-proof claims,
+literature-backed recommendations, reported quantitative results, solver claims,
+and requested benchmark work. Scope the audit to changed claims, equations, and
+relevant call paths; generic code changes do not require a scientific audit.
 
 ## Equations, units, and independent checks
 
@@ -36,6 +36,21 @@ quantifiers, hypotheses, and conventions; expose assumed bridges or weaker
 endpoints. Counts and a clean build do not validate manuscript claims or external
 numerical code.
 
+For a formalization roadmap or admitted prototype, distinguish a type-checked
+target interface from a completed theorem. Check the narrative's named interfaces
+against the actual declarations at the deliverable's dependency pins, including
+namespaces, binders, domains, and separate counts of definitions and theorem
+targets when reported. A successful interface build does not certify admitted
+mathematics; another repository's main-branch build is a different environment.
+
+When independent source-first review is explicitly required, provide the original
+conventions and version-specific passages separately from proposed diagnoses and
+prior findings. Preserve the reviewer's source orientation before releasing those
+assessments; bind actual read ranges and disclose prior exposure or later
+supplements. Matching hashes and another reviewer's source reading establish
+neither the recipient's reading nor semantic agreement. Apply the task's stated
+ordering without imposing this staging on unrelated work.
+
 When proof-route fidelity is requested, inspect every supplied written argument:
 a paper may give multiple routes or omit a promised proof. Record where the
 formalization follows, strengthens, replaces, or cannot complete those steps.
@@ -52,6 +67,14 @@ header/row widths, quoted delimiters, required dimensions, units, types, and mis
 or assumed values; named readers can silently shift interior columns. Execute any
 claimed consistency gate on the actual committed rows and consumer semantics.
 
+For statistical summaries, pair each estimate and interval with the same estimand,
+weighting, observation unit, cohort and endpoint. Equal-instance and equal-family
+means can differ; a family-bootstrap interval need not describe the displayed
+instance mean. Likewise, certification within a wall budget and at termination
+under a solver-time budget are different endpoints. Verify labeled table cells
+and passages against their producing fields; finding the correct numeric token
+elsewhere in a document does not validate the claim being checked.
+
 Trace quantitative and attributed claims to primary sources and their precise
 locations, following secondary references when necessary. Scope dataset-specific
 ranges to that dataset. A replication claim requires comparing the source's
@@ -59,6 +82,14 @@ reported result with the run and an explicit justified error tolerance, not mere
 matching its inputs. A discrepancy should be reported before assigning its cause.
 If attributing a changed result to one input, rerun the old input under matched
 conditions or qualify that attribution.
+
+When empirical literature informs a recommendation, match the claim to the tested
+population/task, comparison, outcomes and uncertainty. A combined intervention
+does not isolate its components; observational or historical comparisons alone
+do not establish causation. A nonsignificant difference is not proof of no effect,
+and preference/interest is not comprehension or transfer. Distinguish tested
+findings from proposed adaptations and local heuristics, especially across delivery
+contexts. Mechanical artifact checks do not establish improved human outcomes.
 
 A DOI's valid redirect followed by publisher anti-bot 403/429 is not a broken DOI.
 Verify mapping/title through the resolver or authoritative metadata, and distinguish
@@ -137,6 +168,17 @@ nonbinding algorithm deadlines under a separate safety bound. Preserve sample
 multiplicities when ignoring harmless row ordering. Equal seeds with unequal work
 do not establish or refute exact repeatability. Later seeded controls do not
 retroactively relabel earlier unseeded measurements.
+
+When native parameter evidence qualifies a run, test the channel the worker
+actually retains. Logs can omit default-valued parameters or start after setter
+messages were emitted. A requested options dictionary or a partial nondefault
+table does not establish every effective value. Prefer readback from the actual
+backend immediately before dispatch, including defaults, with call/source
+identity and timestamps; keep observed thread use as a separate check. Do not
+manufacture textual echoes from requested settings. Fixtures built only from
+invented setter lines prove parser behavior, not capture through the real adapter.
+When a plumbing solve is outside budget, exercise that adapter's control
+application/readback boundary without optimization and retain the coverage limit.
 
 A reusable benchmark validation gate must bind executable dependencies, including
 shared scoring/conversion code, runtime/backend identity and retained evidence,

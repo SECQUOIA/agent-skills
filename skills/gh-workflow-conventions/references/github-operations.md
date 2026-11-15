@@ -93,6 +93,6 @@ active code from comments. Check that logs are nonempty and readable as text.
 Verify mutable state at publication time when it supports a finding or action;
 prefer durable invariants over prose that becomes false when its own remedy lands.
 
-Project integrations and process arguments can contain credentials. Project only
-needed non-sensitive fields; inspect webhook hostnames without paths/queries and
-known-process metadata without full argument/environment dumps.
+Project integrations can contain credentials. Project only needed non-sensitive
+fields; inspect webhook hostnames without paths/queries. Before collecting process
+liveness or resource output, read [process diagnostics](environment-troubleshooting.md#process-diagnostics).

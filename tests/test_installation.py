@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -416,6 +418,331 @@ class InstallationTests(unittest.TestCase):
         self.run_script("uninstall")
         for root in (self.modern, self.claude):
             self.assertFalse((root / "private-skill").exists())
+
+    def test_unified_hooks_flag_and_hook_parity_notice(self):
+        # 1. Partial hook install followed by Antigravity discovery warns without mutating hooks.json
+        self.run_script("install", "--codex-hooks", "--claude-hooks")
+        (self.home / ".gemini").mkdir(parents=True)
+        drift = self.run_script("install")
+        self.assertIn("Hook parity note:", drift.stdout)
+        self.assertIn("Antigravity", drift.stdout)
+        self.assertIn("--hooks=audit", drift.stdout)
+        self.assertFalse((self.home / ".gemini/config/hooks.json").exists())
+
+        # 2. --hooks aligns all active clients (Codex, Claude, Antigravity) and clears drift warning
+        aligned = self.run_script("install", "--hooks")
+        self.assertNotIn("Hook parity note:", aligned.stdout)
+        self.assertTrue((self.home / ".gemini/config/hooks.json").is_file())
+        agy_doc = json.loads((self.home / ".gemini/config/hooks.json").read_text())
+        self.assertIn("--mode audit", agy_doc["secquoia-hooks"]["PreToolUse"][0]["hooks"][0]["command"])
+
+        # 3. Client-specific hook flag overrides --hooks and reports mixed-mode parity note
+        mixed = self.run_script("install", "--hooks=audit", "--claude-hooks=enforce")
+        self.assertIn("mixed modes across clients", mixed.stdout)
+        claude_cmds = [h["command"] for h in self.hooks(self.home / ".claude/settings.json")]
+        self.assertTrue(all("--mode enforce" in c for c in claude_cmds))
+
+    def test_hook_parity_preserves_custom_roots_copy_and_prevents_mode_downgrade(self):
+        private = self.repo / "skills-local/private-skill"
+        private.mkdir(parents=True)
+        (private / "SKILL.md").write_text("---\nname: private-skill\ndescription: private\n---\n")
+
+        custom_codex = self.base / "custom codex"
+        custom_codex_skills = custom_codex / "custom skills"
+        custom_agy = self.base / "custom gemini config"
+
+        # 1. Custom roots + --copy + --include-local + enforce on Codex only
+        self.run_script(
+            "install",
+            "--copy",
+            "--include-local",
+            f"--codex-home={custom_codex}",
+            f"--codex-skills-dir={custom_codex_skills}",
+            f"--antigravity-home={custom_agy}",
+            "--codex-hooks=enforce",
+        )
+        drift = self.run_script(
+            "install",
+            "--copy",
+            "--include-local",
+            f"--codex-home={custom_codex}",
+            f"--codex-skills-dir={custom_codex_skills}",
+            f"--antigravity-home={custom_agy}",
+        )
+        match = re.search(r"Run (\./install\.sh .+?) to align all active clients\.", drift.stdout)
+        self.assertIsNotNone(match, drift.stdout)
+        tokens = shlex.split(match.group(1))
+        self.assertEqual(tokens[0], "./install.sh")
+        self.assertIn("--copy", tokens)
+        self.assertIn("--include-local", tokens)
+        self.assertIn(f"--user-home={self.home}", tokens)
+        self.assertIn(f"--codex-home={custom_codex}", tokens)
+        self.assertIn(f"--codex-skills-dir={custom_codex_skills}", tokens)
+        self.assertIn(f"--antigravity-home={custom_agy}", tokens)
+        self.assertIn("--hooks=enforce", tokens)
+
+        # Executing the exact suggested command aligns custom targets without touching default roots
+        repair = subprocess.run(
+            ["bash", str(self.repo / "install.sh"), *tokens[1:]],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        self.assertEqual(repair.returncode, 0, repair.stdout + repair.stderr)
+        self.assertNotIn("Hook parity note:", repair.stdout)
+        self.assertFalse((self.home / ".codex/hooks.json").exists())
+        self.assertFalse((self.home / ".gemini/config/hooks.json").exists())
+        agy_doc = json.loads((custom_agy / "hooks.json").read_text())
+        self.assertIn(
+            "--mode enforce",
+            agy_doc["secquoia-hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+        )
+        self.assertFalse((custom_agy / "skills/sample-skill").is_symlink())
+        self.assertTrue((custom_agy / "skills/private-skill").is_dir())
+
+        # 2. Mixed modes (Codex=enforce, Claude=audit) + missing Antigravity preserves Codex=enforce
+        mixed_home = self.base / "mixed home"
+        (mixed_home / ".gemini").mkdir(parents=True)
+        for args in (
+            ("--codex-hooks=enforce", "--claude-hooks=audit"),
+            (),
+        ):
+            res = subprocess.run(
+                ["bash", str(self.repo / "install.sh"), "--user-home", str(mixed_home), *args],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertIn("--antigravity-hooks=audit", res.stdout)
+        self.assertIn("without changing existing modes", res.stdout)
+        preserve_match = re.search(
+            r"Run (\./install\.sh .+?) to configure the remaining client\(s\)",
+            res.stdout,
+        )
+        self.assertIsNotNone(preserve_match, res.stdout)
+        preserve_tokens = shlex.split(preserve_match.group(1))
+        preserve_run = subprocess.run(
+            ["bash", str(self.repo / "install.sh"), *preserve_tokens[1:]],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        self.assertEqual(preserve_run.returncode, 0, preserve_run.stdout + preserve_run.stderr)
+        codex_cmds = [h["command"] for h in self.hooks(mixed_home / ".codex/hooks.json")]
+        self.assertTrue(all("--mode enforce" in c for c in codex_cmds))
+        agy_mixed_doc = json.loads((mixed_home / ".gemini/config/hooks.json").read_text())
+        self.assertIn(
+            "--mode audit",
+            agy_mixed_doc["secquoia-hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+        )
+
+    def test_hook_parity_reports_malformed_disabled_and_foreign_checkout_configs(self):
+        # 1. Malformed config when no client is configured still emits warning without leaking contents
+        agy_hooks = self.home / ".gemini/config/hooks.json"
+        agy_hooks.parent.mkdir(parents=True)
+        agy_hooks.write_text("{broken-json: SECRET_TOKEN_123")
+        malformed_only = self.run_script("install")
+        self.assertIn("Hook parity warning: invalid hook configuration for Antigravity", malformed_only.stdout)
+        self.assertIn("invalid JSON", malformed_only.stdout)
+        self.assertNotIn("SECRET_TOKEN_123", malformed_only.stdout)
+
+        # 2. Valid Codex + malformed Antigravity + absent Claude recommends --claude-hooks=audit safely
+        with_codex = self.run_script("install", "--codex-hooks=audit")
+        self.assertIn("Hook parity warning: invalid hook configuration for Antigravity", with_codex.stdout)
+        self.assertIn("--claude-hooks=audit", with_codex.stdout)
+        self.assertNotIn("Run ./install.sh --hooks=audit", with_codex.stdout)
+
+        # 3. Disabled Antigravity hook ("enabled": false) is reported as disabled rather than configured
+        self.run_script("install", "--claude-hooks=audit")
+        agy_hooks.write_text(
+            json.dumps(
+                {
+                    "secquoia-hooks": {
+                        "enabled": False,
+                        "Stop": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    f"python3 '{self.antigravity / 'apply-conversation-lessons/scripts/encounter_ledger.py'}'"
+                                    " hook --agent antigravity --mode audit --installation-id secquoia-encounter-ledger --event Stop"
+                                ),
+                            }
+                        ],
+                    }
+                }
+            )
+        )
+        disabled = self.run_script("install")
+        self.assertIn("enabled: false", disabled.stdout)
+
+        # 4. Invalid UTF-8 bytes emit invalid UTF-8 warning without crashing or leaking bytes
+        agy_hooks.write_bytes(b"\xff\xfe\x00RAW_SECRET_BYTES")
+        bad_utf8 = self.run_script("install")
+        self.assertIn("invalid UTF-8 encoding", bad_utf8.stdout)
+        self.assertNotIn("RAW_SECRET_BYTES", bad_utf8.stdout)
+        agy_hooks.unlink()
+
+        # 5. Foreign checkout enforce in Codex + owned audit in Claude + missing Antigravity
+        #    preserves Codex=enforce when executing the suggested repair command
+        foreign_script = self.base / "foreign_repo/skills/apply-conversation-lessons/scripts/encounter_ledger.py"
+        foreign_script.parent.mkdir(parents=True)
+        foreign_script.write_text("# foreign\n")
+        (self.home / ".codex/hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": (
+                                            f"python3 '{foreign_script}' hook --agent codex"
+                                            " --mode enforce --installation-id secquoia-encounter-ledger"
+                                        ),
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        foreign = self.run_script("install")
+        self.assertIn("other checkout or missing runner", foreign.stdout)
+        self.assertIn("--codex-hooks=enforce", foreign.stdout)
+        self.assertIn("--antigravity-hooks=audit", foreign.stdout)
+        foreign_match = re.search(
+            r"Run (\./install\.sh .+?) to configure the remaining client\(s\)",
+            foreign.stdout,
+        )
+        self.assertIsNotNone(foreign_match, foreign.stdout)
+        foreign_tokens = shlex.split(foreign_match.group(1))
+        foreign_repair = subprocess.run(
+            ["bash", str(self.repo / "install.sh"), *foreign_tokens[1:]],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        self.assertEqual(foreign_repair.returncode, 0, foreign_repair.stdout + foreign_repair.stderr)
+        codex_repaired = [h["command"] for h in self.hooks(self.home / ".codex/hooks.json")]
+        self.assertTrue(all("--mode enforce" in c for c in codex_repaired))
+        self.assertTrue(all(str(foreign_script) not in c for c in codex_repaired))
+        claude_repaired = [h["command"] for h in self.hooks(self.home / ".claude/settings.json")]
+        self.assertTrue(all("--mode audit" in c for c in claude_repaired))
+
+        # 6. Owned handler sharing a file with foreign or malformed sibling handlers still warns
+        owned_codex_script = self.modern / "apply-conversation-lessons/scripts/encounter_ledger.py"
+        (self.home / ".codex/hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "^Bash$",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": (
+                                            f"python3 '{owned_codex_script}' hook --agent codex"
+                                            " --mode audit --installation-id secquoia-encounter-ledger"
+                                        ),
+                                    }
+                                ],
+                            }
+                        ],
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": (
+                                            f"python3 '{foreign_script}' hook --agent codex"
+                                            " --mode enforce --installation-id secquoia-encounter-ledger"
+                                        ),
+                                    },
+                                    {
+                                        "type": "command",
+                                        "command": "python3 'unterminated --installation-id secquoia-encounter-ledger",
+                                    },
+                                ]
+                            }
+                        ],
+                    }
+                }
+            )
+        )
+        mixed_siblings = self.run_script("install")
+        self.assertIn("malformed SECQUOIA hook command in Codex", mixed_siblings.stdout)
+        self.assertIn("mixes this checkout's hooks (audit) with another checkout or missing runner (enforce)", mixed_siblings.stdout)
+        self.assertIn("--codex-hooks=enforce", mixed_siblings.stdout)
+
+    def test_install_prunes_bytecode_safely_and_emits_dash_b_hook_commands(self):
+        external = self.base / "external_bytecode"
+        (external / "__pycache__").mkdir(parents=True)
+        external_pyc = external / "__pycache__/keep.cpython-313.pyc"
+        external_pyc.write_bytes(b"keep")
+
+        source_cache = self.ledger_source / "scripts/__pycache__"
+        source_cache.mkdir(parents=True)
+        (source_cache / "encounter_ledger.cpython-313.pyc").write_bytes(b"stale")
+        (self.ledger_source / "scripts/stray.pyo").write_bytes(b"stale")
+        (self.ledger_source / "scripts/external_link").symlink_to(
+            external, target_is_directory=True
+        )
+
+        (self.home / ".gemini").mkdir(parents=True)
+        self.run_script("install", "--hooks=audit")
+        self.assertFalse(source_cache.exists())
+        self.assertFalse((self.ledger_source / "scripts/stray.pyo").exists())
+        self.assertFalse(
+            list((self.repo / "scripts").rglob("*.pyc")),
+            "install.sh must not write bytecode into repo scripts",
+        )
+        self.assertTrue(external_pyc.is_file())
+        (self.ledger_source / "scripts/external_link").unlink()
+
+        for handler in self.hooks(self.home / ".codex/hooks.json"):
+            tokens = shlex.split(handler["command"])
+            self.assertEqual(tokens[1], "-B")
+            self.assertEqual(tokens[3], "hook")
+        for handler in self.hooks(self.home / ".claude/settings.json"):
+            tokens = shlex.split(handler["command"])
+            self.assertEqual(tokens[1], "-B")
+            self.assertEqual(tokens[3], "hook")
+        agy_doc = json.loads((self.home / ".gemini/config/hooks.json").read_text())
+        agy_tokens = shlex.split(
+            agy_doc["secquoia-hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        )
+        self.assertEqual(agy_tokens[1], "-B")
+        self.assertEqual(agy_tokens[3], "hook")
+
+        # Copy-mode repeat install also cleans stale bytecode inside unchanged owned copies.
+        copy_home = self.base / "copy_home"
+        subprocess.run(
+            ["bash", str(self.repo / "install.sh"), "--user-home", str(copy_home), "--copy"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        copied_cache = (
+            copy_home
+            / ".agents/skills/apply-conversation-lessons/scripts/__pycache__"
+        )
+        copied_cache.mkdir(parents=True)
+        (copied_cache / "stale.pyc").write_bytes(b"stale")
+        subprocess.run(
+            ["bash", str(self.repo / "install.sh"), "--user-home", str(copy_home), "--copy"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertFalse(copied_cache.exists())
 
 
 if __name__ == "__main__":

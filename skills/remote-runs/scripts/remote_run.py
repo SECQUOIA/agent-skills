@@ -395,6 +395,9 @@ def reserve(args, path, config, owner, run_id, nonce, cancel):
             raise RunError("admission cancelled before command startup")
         try:
             with admission_gate(path, deadline, cancel=cancel):
+                _, current_config = namespace(path)
+                if current_config != config:
+                    raise RunError("namespace configuration changed while awaiting admission; verify the new configuration before retrying")
                 claims = claims_in(path, config)
                 if any(item["run_id"] == run_id for item in claims) or (path / "finished" / (run_id + ".json")).exists():
                     raise RunError("run ID already exists; use a fresh run ID")
@@ -690,7 +693,7 @@ def supervise(args, path, config, claim, admission, cancel):
         if args.gpus:
             environment["CUDA_VISIBLE_DEVICES"] = ",".join(
                 admission["gpu"]["devices"][str(index)]["uuid"] for index in args.gpus)
-        worker_args = [sys.executable, str(script), "_worker", "--ready-fd", str(ready_write),
+        worker_args = [sys.executable, "-B", str(script), "_worker", "--ready-fd", str(ready_write),
                        "--gate-fd", str(gate_read), "--cpus", ",".join(map(str, claim["cpus"])), "--", *command]
         try:
             child = subprocess.Popen(worker_args, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,

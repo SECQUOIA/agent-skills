@@ -1,6 +1,6 @@
 # Client settings for resource allocation
 
-Reviewed 2026-10-07. Read when translating a workload tier from
+Reviewed 2026-11-14. Read when translating a workload tier from
 [resource allocation](resource-allocation.md) into an available client setting.
 These are candidate starting points, not measured SECQUOIA optima or minimum
 requirements. Preserve explicit user model/effort choices; this mapping does not
@@ -9,8 +9,8 @@ switch the primary agent automatically.
 | Workload | Codex candidate | Claude Code candidate | Antigravity candidate |
 |---|---|---|---|
 | Ordinary | GPT-6.1 Sol, `medium` | Opus 5.5, `medium` | Gemini 3.8 Flash |
-| Substantive | GPT-6.1 Sol, `high` | Opus 5.5, `high` | Gemini 3.8 Flash (High) or Gemini 3.8 Pro |
-| Exceptional | Evaluate GPT-6 Astra at `high` or `xhigh` when justified | Retain Opus 5.5 at `high` pending comparison; candidates: `xhigh`, or Fable 5.1 when available and within billing authorization | Gemini 4 Argon / Gemini 3.8 Pro |
+| Substantive | GPT-6.1 Sol, `high` | Opus 5.5, `high` | Gemini 3.8 Flash (High) or Gemini 4 Argon |
+| Exceptional | Evaluate GPT-6 Astra at `high` or `xhigh` when justified | Retain Opus 5.5 at `high` pending comparison; candidates: `xhigh`, or Fable 5.1 when available and within billing authorization | Gemini 4 Argon, Gemini 4 Carbon, or Gemini 4 Hydrogen |
 
 Effort labels are not equivalent across models or vendors. Compare representative
 tasks before claiming a gain from `xhigh` or higher effort; an existing setting is
@@ -77,8 +77,27 @@ the effort value sent to the API. See
 
 ## Antigravity controls
 
-Antigravity executes commands through `run_command` in a secure sandbox by default.
-Commands requiring external network access (such as `gh` issue/PR interactions or git remote operations) require sandbox network permission or running with elevated permission (`BypassSandbox: true`). Use standard sandbox execution first unless external network access is strictly necessary.
+A requested reviewer missing from the active client's catalog may be available
+through another installed client. Check those catalogs before reporting it
+unavailable. On 2026-11-14 (`agy` 1.5.9), `agy models` listed
+`gemini-3.8-flash-{low,medium,high}`, `gemini-4-argon-{low,medium,high}`,
+`gemini-4-carbon-{low,medium,high}`, `gemini-4-hydrogen-{low,medium,high,xhigh}`,
+orchestrator aliases (`gemini-pro-orchestrator`, `gemini-pro-orchestrator-argon`),
+and hosted third-party models (`claude-sonnet-4-6`, `claude-opus-4-6-thinking`,
+`gpt-oss-120b-medium`). Recheck that live catalog and select the exact ID with
+`agy --model <id>` (with `--effort low|medium|high|xhigh|max` where supported);
+for a model-specific Carbon or Hydrogen request, do not infer its identity from
+a `pro` or orchestrator alias. Keep requested and client-reported identities
+distinct as described below.
+
+Antigravity's `run_command` tool accepts `{CommandLine, IsDaemon, WaitMsBeforeAsync, toolSummary}`
+(there is no model-supplied `BypassSandbox` argument). Terminal sandboxing
+(`--sandbox` or project Sandbox Mode), non-workspace file access, and external
+network access (`gh`, git remotes) are governed by client/project permission
+policies and runtime approval prompts. Each `run_command` executes in a fresh
+shell session (working-directory changes and exported variables do not persist
+across calls); backgrounded commands notify reactively on completion without
+polling, and delayed timers use `schedule` rather than shell `sleep`.
 
 For headless `agy`, inspect startup warnings before treating a requested mode as
 an applied restriction. An observed invocation on 2026-11-05 warned that
@@ -89,11 +108,11 @@ enforcement is required. A no-tools prompt or a response reporting no tools does
 not establish which permissions were available.
 
 Subagents in Antigravity are invoked via `invoke_subagent` with explicit parameters:
-- `Model`: `inherit`, `flash_lite`, `flash`, or `pro` (use `pro` for frontier reasoning review and complex verification tasks such as Argon 4 / Gemini 4 Argon, and `flash` / `flash_lite` for bounded triage or research).
-- `Workspace`: `inherit`, `branch` (isolated copy/branch), or `share` (shared git worktree).
+- `Model`: `inherit` (default, keeping the active session model), `flash_lite`, `flash`, or `pro` (for larger reasoning review and complex verification tasks). Native `swarm` (`action: "models"` / `"add"`) additionally accepts exact catalog model IDs when multi-worker board coordination or exact helper model pinning is explicitly warranted.
+- `Workspace`: `inherit`, `branch` (isolated copy/branch), or `share` (shared repository worktree).
 - Coordinator-worker communication uses `send_message` with reactive notifications (no polling needed).
 
-Skills are discovered via `~/.gemini/config/skills/` globally, `.agents/skills/` in workspaces, or declared in `skills.json`. Lifecycle hooks live in `~/.gemini/config/hooks.json` or `.agents/hooks.json` under named hook keys matching tool `run_command`.
+Skills are discovered via `~/.gemini/config/skills/` globally, `.agents/skills/` in workspaces, or declared in `skills.json`. Lifecycle hooks live in `~/.gemini/config/hooks.json` or `.agents/hooks.json` under named hook keys (`PreToolUse` and `PostToolUse` grouped under `"matcher": "run_command"`; `SessionStart` and `Stop` as flat handler lists).
 
 ## Applying and reporting a request
 

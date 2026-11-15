@@ -1,6 +1,9 @@
 ---
 name: apply-conversation-lessons
 description: Fold conversation takeaways or lessons into existing skills when requested. Use for durable workflow improvements; does not run automatically or submit accumulated changes.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # Apply Conversation Lessons
@@ -19,17 +22,19 @@ change only the smallest appropriate owner.
    under the relevant rule version. Retries and agent switches on one task are
    one episode. Recurrence makes an edit eligible, not mandatory.
 3. When the encounter runner is available, inspect
-   `python -B <skill>/scripts/encounter_ledger.py report --json` before triage.
+   `python3 -B <skill>/scripts/encounter_ledger.py report --json` before triage.
    Use [evidence guidance](references/evidence.md) to interpret its revisions,
-   modes, and model attribution. Do not equate classifier flags with model errors.
+   modes, and model attribution, and
+   [worker publication audit](references/worker-publication-audit.md) when
+   inspecting `--remote-write-audit` observations. Do not equate classifier flags
+   with model errors.
    If a helper returns `ENOENT` despite being readable through another tool,
    inspect its symlink destination and the executing sandbox's filesystem
    visibility before declaring it missing. Resolve the path with `readlink -f`
    where available; execution outside permitted roots requires supported,
-   authorized filesystem access, which may involve Antigravity's
-   `BypassSandbox: true` when allowed by the active runtime. If that access is
-   unavailable, report the helper as inaccessible and continue triage using
-   available evidence.
+   authorized filesystem access in the active runtime or project permissions.
+   If that access is unavailable, report the helper as inaccessible and
+   continue triage using available evidence.
 4. Keep lessons that prevent plausible wrong results, silent damage, or repeated
    expensive rediscovery. Retire one-off facts, obvious recoverable command errors,
    generic advice, and preferences already supplied by higher-level instructions.
@@ -46,8 +51,11 @@ change only the smallest appropriate owner.
 - When choosing models, effort, or helpers, use shared
   [resource allocation](../gh-workflow-conventions/references/resource-allocation.md).
 - Before editing a managed/shared repository, follow
-  [managed changes](references/managed-changes.md). Keep user-owned customizations
-  out of plugin caches unless the user specifically requested a cache edit.
+  [managed changes](references/managed-changes.md); after committing in an
+  isolated worktree, follow
+  [isolated-work integration](references/integrating-isolated-work.md). Keep
+  user-owned customizations out of plugin caches unless the user specifically
+  requested a cache edit.
 - Keep discovery descriptions short and precise. Put policy, outcomes, and routing
   in the core; put substantial conditional detail in references. Do not wait for
   a tool's output limit before reducing unnecessary context.
@@ -70,6 +78,16 @@ change only the smallest appropriate owner.
   compare against the previous skill and a policy-equivalent minimal baseline;
   see [evidence guidance](references/evidence.md). Do not infer better behavior
   from smaller files or passing metadata validation alone.
+
+## Available Scripts
+
+Run bundled helpers with `python3 -B` so symlinked skill directories do not
+accumulate bytecode caches:
+
+| Script | Purpose | Arguments |
+|---|---|---|
+| `scripts/encounter_ledger.py` | Record and report workflow rule encounters, remote-write audits, and client lifecycle hooks | `report [--since-days N] [--min-encounters N] [--remote-write-audit] [--json]`, `record --rule-id ID --workflow-id ID --agent NAME --outcome OUTCOME`, `hook --agent NAME [--mode audit\|enforce]`, `install-{codex,claude,antigravity}-hooks`, `uninstall-{codex,claude,antigravity}-hooks` |
+| `scripts/plan_integration.py` | Read-only ancestry and worktree collision check before integrating isolated skill commits | `--repo PATH --branch NAME --default-branch NAME --original SHA --upstream SHA --synced SHA --result SHA` |
 
 ## Handoff
 

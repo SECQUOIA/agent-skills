@@ -87,13 +87,17 @@ Installation checks current-source conflicts before pruning retired entries.
 
 ## Optional encounter hooks
 
-Hooks are a per-machine opt-in, separate from installing skills:
+Hooks are a per-machine opt-in, separate from installing skills. Use `--hooks`
+to configure all active clients (`Codex`, `Claude`, and `Antigravity` when
+`~/.gemini` is present), or pass client-specific flags to target/override one:
 
 ```bash
-./install.sh --codex-hooks                  # audit mode
-./install.sh --claude-hooks                 # audit mode
-./install.sh --antigravity-hooks            # audit mode
-./install.sh --codex-hooks=enforce          # optional enforcement
+./install.sh --hooks                        # audit mode across active clients
+./install.sh --hooks=enforce                # optional enforcement across active clients
+./install.sh --codex-hooks                  # single-client audit mode
+./install.sh --claude-hooks
+./install.sh --antigravity-hooks
+./install.sh --codex-hooks=enforce          # single-client enforcement
 ./install.sh --claude-hooks=enforce
 ./install.sh --antigravity-hooks=enforce
 ```
@@ -101,7 +105,9 @@ Hooks are a per-machine opt-in, separate from installing skills:
 Codex handlers live in the selected Codex home's `hooks.json`; Claude handlers live
 in `~/.claude/settings.json`; Antigravity handlers live in `~/.gemini/config/hooks.json`.
 Installation preserves unrelated hooks and settings,
-backs up changed files, and is repeatable with the same arguments. In Codex, review
+backs up changed files, and is repeatable with the same arguments. Re-running
+`./install.sh` without hook flags preserves existing hook files and prints a parity
+note if owned hooks are enabled for only a subset of active clients. In Codex, review
 and trust the definition through `/hooks`; restart client sessions as needed.
 Generated commands retain the Python interpreter used during installation, with
 interpreter and script paths quoted so spaces remain valid.
@@ -141,7 +147,7 @@ observed labels only; do not infer them from a default configuration.
 From the repository:
 
 ```bash
-python3 skills/apply-conversation-lessons/scripts/encounter_ledger.py report --json
+python3 -B skills/apply-conversation-lessons/scripts/encounter_ledger.py report --json
 ```
 
 Reports retain episode totals and add `runtime_observations` grouped by recorded

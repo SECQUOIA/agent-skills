@@ -1,6 +1,9 @@
 ---
 name: remote-runs
 description: Prepare, launch, monitor, stop, resume, and retrieve experiment runs on external servers, including CPU-heavy Dantzig work and shared GPU hosts. Use existing project harnesses and preserve resource budgets and run evidence.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # Remote Runs
@@ -121,6 +124,16 @@ ambiguous, preserve the run and report the uncertainty. Do not infer that a
 missing result authorizes unlimited retries. Bound recovery to the requested
 cases and existing retry policy; repeated identical failure needs diagnosis
 before another attempt.
+
+## Available Scripts
+
+Run the bundled Linux helper with `python3 -B` (see
+[launcher usage and recovery](references/launcher.md)):
+
+| Script | Purpose | Arguments |
+|---|---|---|
+| `scripts/remote_run.py` | Initialize shared host namespaces, probe occupancy, supervise CPU/GPU/memory-bounded runs, and stop or recover reservations | `init --state-dir DIR --memory-budget-mib MIB [--group GROUP]`, `probe [--cpus LIST] [--gpus LIST]`, `run --state-dir DIR (--cpus LIST \| --cores N) --memory-mib MIB --time-limit SEC --run-dir DIR [--gpus LIST] -- CMD...`, `status --state-dir DIR [--run-id ID]`, `stop --state-dir DIR --run-id ID [--wait SEC]`, `recover --state-dir DIR --run-id ID` |
+| `scripts/resource_probe.py` | Fail-closed Linux `/proc`, `/sys`, cgroup v2, and GPU observation module imported by `remote_run.py` | Imported Python module (not a standalone CLI); observes state without reserving resources |
 
 ## Retrieve and hand off
 

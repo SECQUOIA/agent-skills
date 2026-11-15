@@ -162,7 +162,8 @@ class RemoteRunsTests(unittest.TestCase):
             signal_owned(expected, signal.SIGKILL)
 
     def spawn(self, args, *, smt_alias=False, probe_mode="idle", limits=None,
-              fake_boot=None, memory_probe_marker=None, stale_census_pid=None):
+              fake_boot=None, memory_probe_marker=None, stale_census_pid=None,
+              namespace_marker=None, cpu_probe_marker=None, cpu_probe_ready=None):
         self.serial += 1
         stdout = self.root / f"cli-{self.serial}.out"
         stderr = self.root / f"cli-{self.serial}.err"
@@ -186,12 +187,24 @@ class RemoteRunsTests(unittest.TestCase):
                     for index, cpu in enumerate(self.allowed)
                 }
                 self.probes.cpu_topology = lambda: topology
+                if namespace_marker is not None:
+                    original_namespace = self.runner.namespace
+
+                    def marked_namespace(state_dir):
+                        result = original_namespace(state_dir)
+                        namespace_marker.write_text("loaded")
+                        return result
+
+                    self.runner.namespace = marked_namespace
 
                 def cpu_probe(cpus, interval=.25, max_busy_percent=5):
+                    if cpu_probe_marker is not None:
+                        cpu_probe_marker.write_text("sampled")
                     if probe_mode == "unknown":
                         raise self.probes.ProbeError("synthetic unavailable CPU sample")
                     return {
-                        "idle": probe_mode != "busy",
+                        "idle": (probe_mode != "busy"
+                                 and (cpu_probe_ready is None or cpu_probe_ready.exists())),
                         "busy_percent": {str(cpu): 99.0 if probe_mode == "busy" else 0.0
                                          for cpu in cpus},
                     }
@@ -361,6 +374,66 @@ class RemoteRunsTests(unittest.TestCase):
         self.assertEqual(self.stop("memory-b").returncode, 0)
         first.wait()
         second.wait()
+
+    def check_budget_change_during_admission(self, budget, *, retry):
+        import fcntl
+
+        run_id = f"budget-{budget}-{'retry' if retry else 'initial'}"
+        loaded, sampled, ready = [self.root / f"{run_id}-{name}"
+                                  for name in ("loaded", "sampled", "ready")]
+        marker = self.root / f"{run_id}-payload"
+        command = f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')"
+        config_path = self.state / "config.json"
+        gate_path = self.state / "admission.lock"
+        gate_inode = (gate_path.stat().st_dev, gate_path.stat().st_ino)
+        with gate_path.open("r+") as gate:
+            fcntl.flock(gate, fcntl.LOCK_EX)
+            try:
+                config = json.loads(config_path.read_text())
+                config["memory_budget_mib"] = 10
+                self.runner.atomic_json(config_path, config)
+                waiting = self.run_job(
+                    run_id, command, memory=8, options=["--wait", "3"],
+                    namespace_marker=loaded,
+                    cpu_probe_marker=sampled if retry else None,
+                    cpu_probe_ready=ready if retry else None,
+                )
+                self.wait_path(loaded)
+                if retry:
+                    fcntl.flock(gate, fcntl.LOCK_UN)
+                    self.wait_path(sampled)
+                    fcntl.flock(gate, fcntl.LOCK_EX)
+                # Update only while the parent holds the real admission gate.
+                config["memory_budget_mib"] = budget
+                self.runner.atomic_json(config_path, config)
+                ready.write_text("idle")
+            finally:
+                fcntl.flock(gate, fcntl.LOCK_UN)
+
+        if budget == 10:
+            self.assertEqual(waiting.wait(), 0, waiting.stdout + waiting.stderr)
+            self.assertTrue(marker.exists())
+        else:
+            self.assertNotEqual(waiting.wait(), 0)
+            self.assertIn("namespace configuration changed", waiting.stdout + waiting.stderr)
+            self.assertFalse(marker.exists())
+            self.assertFalse(self.claim(run_id).exists())
+            self.assertFalse((self.root / run_id / "run.json").exists())
+            fresh = self.run_job(run_id + "-fresh", command, memory=8)
+            self.assertEqual(fresh.wait() == 0, budget >= 8, fresh.stdout + fresh.stderr)
+            self.assertEqual(marker.exists(), budget >= 8)
+        self.assertEqual((gate_path.stat().st_dev, gate_path.stat().st_ino), gate_inode)
+        self.assertEqual(list((self.state / "claims").glob("*.json")), [])
+
+    def test_configuration_change_before_first_admission_blocks_stale_budget(self):
+        for budget in (5, 20, 10):
+            with self.subTest(budget=budget):
+                self.check_budget_change_during_admission(budget, retry=False)
+
+    def test_configuration_change_between_admission_retries_blocks_stale_budget(self):
+        for budget in (5, 20, 10):
+            with self.subTest(budget=budget):
+                self.check_budget_change_during_admission(budget, retry=True)
 
     def test_failed_gpu_claim_does_not_partially_reserve_a_cpu(self):
         if len(self.allowed) < 2:
@@ -775,6 +848,47 @@ class RemoteRunsTests(unittest.TestCase):
         self.assertNotEqual(call.wait(), 0)
         self.assertFalse(marker.exists())
         self.assertEqual(broken.read_text(), "{not-json")
+
+    def test_dash_b_runner_and_worker_leave_zero_bytecode_in_scripts_dir(self):
+        copied_scripts = self.root / "copied-scripts"
+        copied_scripts.mkdir()
+        for name in ("remote_run.py", "resource_probe.py"):
+            (copied_scripts / name).write_bytes((SCRIPTS / name).read_bytes())
+        runner_copy = copied_scripts / "remote_run.py"
+        original_file = self.runner.__file__
+        prior_env = os.environ.pop("PYTHONDONTWRITEBYTECODE", None)
+        try:
+            self.runner.__file__ = str(runner_copy)
+            call = self.run_job("dash-b-worker", "raise SystemExit(0)")
+            self.assertEqual(call.wait(), 0, call.stdout + call.stderr)
+        finally:
+            self.runner.__file__ = original_file
+            if prior_env is not None:
+                os.environ["PYTHONDONTWRITEBYTECODE"] = prior_env
+        self.assertFalse((copied_scripts / "__pycache__").exists())
+        self.assertEqual(list(copied_scripts.rglob("*.pyc")), [])
+
+
+class RemoteRunBytecodeContractTests(unittest.TestCase):
+    def test_worker_command_includes_dash_b_and_startup_writes_no_bytecode(self):
+        source = (SCRIPTS / "remote_run.py").read_text(encoding="utf-8")
+        self.assertIn('[sys.executable, "-B", str(script), "_worker"', source)
+        with tempfile.TemporaryDirectory() as tmp:
+            copied_scripts = Path(tmp) / "scripts"
+            copied_scripts.mkdir()
+            for name in ("remote_run status", "remote_run.py", "resource_probe.py"):
+                if name.endswith(".py"):
+                    (copied_scripts / name).write_bytes((SCRIPTS / name).read_bytes())
+            env = {k: v for k, v in os.environ.items() if k != "PYTHONDONTWRITEBYTECODE"}
+            proc = subprocess.run(
+                [sys.executable, "-B", str(copied_scripts / "remote_run.py"), "--help"],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertFalse((copied_scripts / "__pycache__").exists())
+            self.assertEqual(list(copied_scripts.rglob("*.pyc")), [])
 
 
 if __name__ == "__main__":

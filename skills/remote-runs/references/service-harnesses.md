@@ -30,6 +30,10 @@ does not mean the solver-native thread count. Preserve distinct settings such as
 single-thread BLAS with a separately declared multithreaded solver; setting both
 to the solver count can silently change an established study.
 
+When captured solver settings qualify measurement acceptance, apply the
+[native-parameter evidence guidance](../../gh-workflow-conventions/references/scientific-verification.md)
+to the worker's real adapter and capture channel before the measured matrix.
+
 Keep actual resident-memory/no-swap limits in the case cgroup and require the
 helper to verify them. Its declared memory reservation also includes supervisor
 overhead; include a separate controller's allowance in the aggregate plan.
@@ -49,6 +53,18 @@ between the helper's soft deadline and the service's hard kill for cleanup and
 durable quiescence evidence. A hard kill or OOM can legitimately leave a retained
 claim; a dead unit is not permission to delete it. Abort subsequent dispatch when
 either descendant quiescence or allocation release cannot be established.
+
+When a controller must drain separately supervised cases, use its verified
+graceful-stop interface while its resource helper remains alive. Cancelling the
+helper terminates the controller's descendant tree and can kill the cleanup
+clients it launches; a longer kill grace alone does not protect those clients.
+Verify each owned case's processes/cgroup and allocation closure separately, then
+controller/helper quiescence and final receipts. Controller-helper completion
+alone does not establish sibling-case closure. If graceful draining fails, retain
+claims and evidence and use the existing identity-checked operator recovery
+procedure. Exercise this shutdown path with a controller that launches cleanup
+clients for separately supervised cases; direct-child cancellation tests do not
+cover it.
 
 ## Logs and failure evidence
 
