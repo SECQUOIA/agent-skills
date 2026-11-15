@@ -141,12 +141,36 @@ def codex_root(
     return selected, candidates
 
 
+def prune_bytecode(root: Path) -> None:
+    """Remove Python bytecode caches under root without following symlinks."""
+    if not root.is_dir() or root.is_symlink():
+        return
+    for current, dirs, files in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        kept_dirs: list[str] = []
+        for name in dirs:
+            candidate = current_path / name
+            if name == "__pycache__" and not candidate.is_symlink():
+                shutil.rmtree(candidate)
+            elif not candidate.is_symlink():
+                kept_dirs.append(name)
+        dirs[:] = kept_dirs
+        for name in files:
+            if name.endswith((".pyc", ".pyo")):
+                candidate = current_path / name
+                if not candidate.is_symlink():
+                    candidate.unlink()
+
+
 def fingerprint(path: Path) -> str:
     """Compare copy contents, excluding installer bookkeeping and Python caches."""
     digest = hashlib.sha256()
     for item in sorted(path.rglob("*")):
         relative = item.relative_to(path)
-        if any(part in IGNORED or part.endswith(".pyc") for part in relative.parts):
+        if any(
+            part in IGNORED or part.endswith((".pyc", ".pyo"))
+            for part in relative.parts
+        ):
             continue
         digest.update(str(relative).encode() + b"\0")
         if item.is_symlink():
@@ -191,7 +215,7 @@ def install_skill(source: Path, root: Path, *, copy: bool, revision: str) -> Non
                 source,
                 staged,
                 symlinks=True,
-                ignore=shutil.ignore_patterns(*IGNORED, "*.pyc"),
+                ignore=shutil.ignore_patterns(*IGNORED, "*.pyc", "*.pyo"),
             )
             (staged / MARKER).write_text(
                 json.dumps(
@@ -323,7 +347,7 @@ def run_hooks(
             )
     if source_script.is_file():
         for command in commands:
-            subprocess.run([sys.executable, *command], check=True)
+            subprocess.run([sys.executable, "-B", *command], check=True)
 
 
 class HookConfigState(NamedTuple):
@@ -346,6 +370,21 @@ def owned_hook_scripts(repo: Path, roots: list[Path]) -> set[Path]:
     return allowed
 
 
+def _extract_hook_runner(tokens: Sequence[str]) -> Path | None:
+    if not tokens:
+        return None
+    index = 1
+    while index < len(tokens) and tokens[index] == "-B":
+        index += 1
+    if (
+        index + 1 >= len(tokens)
+        or tokens[index].startswith("-")
+        or tokens[index + 1] != "hook"
+    ):
+        return None
+    return Path(tokens[index])
+
+
 def _classify_handler_command(
     command: str, allowed_scripts: set[Path] | None = None
 ) -> tuple[str, str | None]:
@@ -364,9 +403,9 @@ def _classify_handler_command(
             mode = token.split("=", 1)[1]
             break
     if allowed_scripts is not None:
-        if len(tokens) <= 2 or tokens[2] != "hook":
+        runner = _extract_hook_runner(tokens)
+        if runner is None:
             return ("foreign", mode)
-        runner = Path(tokens[1])
         try:
             is_valid_runner = runner.is_file() and runner.resolve() in allowed_scripts
         except OSError:
@@ -777,11 +816,15 @@ def install(
                 )
     revision = installed_revision(repo)
     roots = source_roots if source_roots is not None else [repo / "skills"]
+    for source_root in roots:
+        prune_bytecode(source_root)
     for root in targets:
         prune_retired(root, roots)
         print(f"Installing into {root} ({'copy' if copy else 'symlink'}).")
         for source in sources:
             install_skill(source, root, copy=copy, revision=revision)
+            if copy:
+                prune_bytecode(root / source.name)
     guard_source = repo / "hooks" / "pre-push"
     guard = repo / ".git" / "hooks" / "pre-push"
     if (repo / ".git").is_dir() and guard_source.is_file():

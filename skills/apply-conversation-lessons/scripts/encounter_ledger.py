@@ -21,6 +21,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -219,9 +220,9 @@ GH_VALUE_FLAGS = FLAGS_WITH_VALUES | {
 }
 
 # Short-flag arity is action-specific in gh. For example, -a is a value for
-# `pr edit` but boolean --approve for `pr review`; -f is a GraphQL field but
-# boolean --force for `pr checkout`; and -m is a milestone value for edit but
-# boolean --merge for `pr merge`.
+# pr edit, while boolean --approve is used for pr review. -f is a GraphQL field,
+# while boolean --force is used for pr checkout. -m is a milestone value for edit,
+# while boolean --merge is used for pr merge.
 GH_ACTION_BOOLEAN_FLAGS = {
     ("pr", "checkout"): {"-f"},
     ("pr", "merge"): {"-m", "-s"},
@@ -527,15 +528,13 @@ def connect_database(explicit_state_dir: str | None = None) -> sqlite3.Connectio
     stale_cutoff = isoformat(utc_now() - timedelta(days=HOOK_STATE_RETENTION_DAYS))
     with _write_transaction(connection):
         _migrate_legacy_hook_state(connection)
-        for table in (
-            "hook_activity",
-            "hook_tools",
-            "hook_sessions",
-            "hook_completed_tools",
+        for prune_sql in (
+            "DELETE FROM hook_activity WHERE updated_at < ?",
+            "DELETE FROM hook_tools WHERE updated_at < ?",
+            "DELETE FROM hook_sessions WHERE updated_at < ?",
+            "DELETE FROM hook_completed_tools WHERE updated_at < ?",
         ):
-            connection.execute(
-                f"DELETE FROM {table} WHERE updated_at < ?", (stale_cutoff,)
-            )
+            connection.execute(prune_sql, (stale_cutoff,))
         connection.execute(
             "DELETE FROM remote_write_observations WHERE observed_at < ?",
             (stale_cutoff,),
@@ -867,6 +866,125 @@ def record_encounter(
         return identifier
 
 
+_RUNTIME_REPORT_QUERIES: dict[tuple[bool, bool], str] = {
+    (True, True): """
+        SELECT o.agent, o.model, o.reasoning_effort, o.client_version,
+               o.harness_version, o.event, o.skill_revision,
+               COUNT(*) AS observations, COUNT(DISTINCT e.id) AS episodes_touched,
+               SUM(o.outcome = 'passed' AND (CASE WHEN o.target_resolution IN ('tracked_target', 'unresolved_target') THEN o.target_resolution ELSE CASE WHEN e.target_resolution IN ('tracked_target', 'unresolved_target') THEN e.target_resolution ELSE legacy_target_resolution(e.workflow_label) END END) = 'tracked_target') AS passed,
+               SUM(o.outcome = 'prevented' AND (CASE WHEN o.target_resolution IN ('tracked_target', 'unresolved_target') THEN o.target_resolution ELSE CASE WHEN e.target_resolution IN ('tracked_target', 'unresolved_target') THEN e.target_resolution ELSE legacy_target_resolution(e.workflow_label) END END) = 'tracked_target') AS prevented,
+               SUM(o.outcome = 'escaped' AND (CASE WHEN o.target_resolution IN ('tracked_target', 'unresolved_target') THEN o.target_resolution ELSE CASE WHEN e.target_resolution IN ('tracked_target', 'unresolved_target') THEN e.target_resolution ELSE legacy_target_resolution(e.workflow_label) END END) = 'tracked_target') AS escaped,
+               SUM((CASE WHEN o.target_resolution IN ('tracked_target', 'unresolved_target') THEN o.target_resolution ELSE CASE WHEN e.target_resolution IN ('tracked_target', 'unresolved_target') THEN e.target_resolution ELSE legacy_target_resolution(e.workflow_label) END END) = 'unresolved_target') AS unresolved_target
+        FROM encounter_observations o JOIN encounters e ON e.id = o.encounter_id
+        WHERE e.rule_id = ? AND e.last_seen >= ?
+        GROUP BY o.agent, o.model, o.reasoning_effort, o.client_version,
+                 o.harness_version, o.event, o.skill_revision
+        ORDER BY o.agent, o.model, o.reasoning_effort, o.client_version,
+                 o.harness_version, o.event, o.skill_revision
+    """,
+    (True, False): """
+        SELECT o.agent, o.model, o.reasoning_effort, o.client_version,
+               o.harness_version, o.event, o.skill_revision,
+               COUNT(*) AS observations, COUNT(DISTINCT e.id) AS episodes_touched,
+               SUM(o.outcome = 'passed' AND (CASE WHEN o.target_resolution IN ('tracked_target', 'unresolved_target') THEN o.target_resolution ELSE legacy_target_resolution(e.workflow_label) END) = 'tracked_target') AS passed,
+               SUM(o.outcome = 'prevented' AND (CASE WHEN o.target_resolution IN ('tracked_target', 'unresolved_target') THEN o.target_resolution ELSE legacy_target_resolution(e.workflow_label) END) = 'tracked_target') AS prevented,
+               SUM(o.outcome = 'escaped' AND (CASE WHEN o.target_resolution IN ('tracked_target', 'unresolved_target') THEN o.target_resolution ELSE legacy_target_resolution(e.workflow_label) END) = 'tracked_target') AS escaped,
+               SUM((CASE WHEN o.target_resolution IN ('tracked_target', 'unresolved_target') THEN o.target_resolution ELSE legacy_target_resolution(e.workflow_label) END) = 'unresolved_target') AS unresolved_target
+        FROM encounter_observations o JOIN encounters e ON e.id = o.encounter_id
+        WHERE e.rule_id = ? AND e.last_seen >= ?
+        GROUP BY o.agent, o.model, o.reasoning_effort, o.client_version,
+                 o.harness_version, o.event, o.skill_revision
+        ORDER BY o.agent, o.model, o.reasoning_effort, o.client_version,
+                 o.harness_version, o.event, o.skill_revision
+    """,
+    (False, True): """
+        SELECT o.agent, o.model, o.reasoning_effort, o.client_version,
+               o.harness_version, o.event, o.skill_revision,
+               COUNT(*) AS observations, COUNT(DISTINCT e.id) AS episodes_touched,
+               SUM(o.outcome = 'passed' AND (CASE WHEN e.target_resolution IN ('tracked_target', 'unresolved_target') THEN e.target_resolution ELSE legacy_target_resolution(e.workflow_label) END) = 'tracked_target') AS passed,
+               SUM(o.outcome = 'prevented' AND (CASE WHEN e.target_resolution IN ('tracked_target', 'unresolved_target') THEN e.target_resolution ELSE legacy_target_resolution(e.workflow_label) END) = 'tracked_target') AS prevented,
+               SUM(o.outcome = 'escaped' AND (CASE WHEN e.target_resolution IN ('tracked_target', 'unresolved_target') THEN e.target_resolution ELSE legacy_target_resolution(e.workflow_label) END) = 'tracked_target') AS escaped,
+               SUM((CASE WHEN e.target_resolution IN ('tracked_target', 'unresolved_target') THEN e.target_resolution ELSE legacy_target_resolution(e.workflow_label) END) = 'unresolved_target') AS unresolved_target
+        FROM encounter_observations o JOIN encounters e ON e.id = o.encounter_id
+        WHERE e.rule_id = ? AND e.last_seen >= ?
+        GROUP BY o.agent, o.model, o.reasoning_effort, o.client_version,
+                 o.harness_version, o.event, o.skill_revision
+        ORDER BY o.agent, o.model, o.reasoning_effort, o.client_version,
+                 o.harness_version, o.event, o.skill_revision
+    """,
+    (False, False): """
+        SELECT o.agent, o.model, o.reasoning_effort, o.client_version,
+               o.harness_version, o.event, o.skill_revision,
+               COUNT(*) AS observations, COUNT(DISTINCT e.id) AS episodes_touched,
+               SUM(o.outcome = 'passed' AND legacy_target_resolution(e.workflow_label) = 'tracked_target') AS passed,
+               SUM(o.outcome = 'prevented' AND legacy_target_resolution(e.workflow_label) = 'tracked_target') AS prevented,
+               SUM(o.outcome = 'escaped' AND legacy_target_resolution(e.workflow_label) = 'tracked_target') AS escaped,
+               SUM(legacy_target_resolution(e.workflow_label) = 'unresolved_target') AS unresolved_target
+        FROM encounter_observations o JOIN encounters e ON e.id = o.encounter_id
+        WHERE e.rule_id = ? AND e.last_seen >= ?
+        GROUP BY o.agent, o.model, o.reasoning_effort, o.client_version,
+                 o.harness_version, o.event, o.skill_revision
+        ORDER BY o.agent, o.model, o.reasoning_effort, o.client_version,
+                 o.harness_version, o.event, o.skill_revision
+    """,
+}
+
+_REPORT_ENCOUNTERS_QUERIES: dict[bool, str] = {
+    True: """
+        WITH assessed AS (
+            SELECT e.*,
+                   (CASE WHEN e.target_resolution IN ('tracked_target', 'unresolved_target')
+                         THEN e.target_resolution
+                         ELSE legacy_target_resolution(e.workflow_label) END) AS assessment,
+                   (e.target_resolution = 'legacy') AS legacy_assessment
+            FROM encounters e WHERE last_seen >= ?
+        )
+        SELECT
+            rule_id,
+            COUNT(*) AS total_episodes,
+            SUM(assessment = 'tracked_target') AS opportunities,
+            SUM(assessment = 'tracked_target' AND outcome != 'passed') AS violations,
+            SUM(assessment = 'tracked_target' AND outcome = 'prevented') AS prevented,
+            SUM(assessment = 'tracked_target' AND outcome = 'escaped') AS escaped,
+            SUM(assessment = 'unresolved_target') AS unresolved_target_episodes,
+            SUM(legacy_assessment) AS legacy_inferred_target_episodes,
+            COUNT(DISTINCT CASE WHEN assessment = 'tracked_target' THEN workflow_key END) AS distinct_targets,
+            GROUP_CONCAT(DISTINCT last_skill_revision) AS revisions,
+            MIN(first_seen) AS first_seen,
+            MAX(last_seen) AS last_seen
+        FROM assessed
+        GROUP BY rule_id
+        HAVING violations >= ? OR unresolved_target_episodes > 0
+        ORDER BY violations DESC, rule_id
+    """,
+    False: """
+        WITH assessed AS (
+            SELECT e.*,
+                   legacy_target_resolution(e.workflow_label) AS assessment,
+                   1 AS legacy_assessment
+            FROM encounters e WHERE last_seen >= ?
+        )
+        SELECT
+            rule_id,
+            COUNT(*) AS total_episodes,
+            SUM(assessment = 'tracked_target') AS opportunities,
+            SUM(assessment = 'tracked_target' AND outcome != 'passed') AS violations,
+            SUM(assessment = 'tracked_target' AND outcome = 'prevented') AS prevented,
+            SUM(assessment = 'tracked_target' AND outcome = 'escaped') AS escaped,
+            SUM(assessment = 'unresolved_target') AS unresolved_target_episodes,
+            SUM(legacy_assessment) AS legacy_inferred_target_episodes,
+            COUNT(DISTINCT CASE WHEN assessment = 'tracked_target' THEN workflow_key END) AS distinct_targets,
+            GROUP_CONCAT(DISTINCT last_skill_revision) AS revisions,
+            MIN(first_seen) AS first_seen,
+            MAX(last_seen) AS last_seen
+        FROM assessed
+        GROUP BY rule_id
+        HAVING violations >= ? OR unresolved_target_episodes > 0
+        ORDER BY violations DESC, rule_id
+    """,
+}
+
+
 def _runtime_report(
     connection: sqlite3.Connection, rule_id: str, cutoff: str
 ) -> dict[str, Any]:
@@ -879,37 +997,21 @@ def _runtime_report(
         "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'encounter_observations'"
     ).fetchone()
     cohorts = []
-    assessment, _ = _report_resolution_sql(connection)
+    _report_resolution_sql(connection)
     if exists:
-        columns = {
+        obs_columns = {
             row["name"]
             for row in connection.execute("PRAGMA table_info(encounter_observations)")
         }
-        if "target_resolution" in columns:
-            assessment = (
-                "CASE WHEN o.target_resolution IN ('tracked_target', 'unresolved_target') "
-                f"THEN o.target_resolution ELSE {assessment} END"
-            )
+        enc_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(encounters)")
+        }
+        query = _RUNTIME_REPORT_QUERIES[
+            ("target_resolution" in obs_columns, "target_resolution" in enc_columns)
+        ]
         cohorts = [
             dict(row)
-            for row in connection.execute(
-                f"""
-            SELECT o.agent, o.model, o.reasoning_effort, o.client_version,
-                   o.harness_version, o.event, o.skill_revision,
-                   COUNT(*) AS observations, COUNT(DISTINCT e.id) AS episodes_touched,
-                   SUM(o.outcome = 'passed' AND ({assessment}) = 'tracked_target') AS passed,
-                   SUM(o.outcome = 'prevented' AND ({assessment}) = 'tracked_target') AS prevented,
-                   SUM(o.outcome = 'escaped' AND ({assessment}) = 'tracked_target') AS escaped,
-                   SUM(({assessment}) = 'unresolved_target') AS unresolved_target
-            FROM encounter_observations o JOIN encounters e ON e.id = o.encounter_id
-            WHERE e.rule_id = ? AND e.last_seen >= ?
-            GROUP BY o.agent, o.model, o.reasoning_effort, o.client_version,
-                     o.harness_version, o.event, o.skill_revision
-            ORDER BY o.agent, o.model, o.reasoning_effort, o.client_version,
-                     o.harness_version, o.event, o.skill_revision
-            """,
-                (rule_id, cutoff),
-            ).fetchall()
+            for row in connection.execute(query, (rule_id, cutoff)).fetchall()
         ]
     recorded = sum(row["observations"] for row in cohorts)
     return {
@@ -993,33 +1095,12 @@ def report_encounters(
             agents_by_rule.setdefault(agent_row["rule_id"], set()).update(
                 str(agent) for agent in agents if agent
             )
-    assessment, legacy = _report_resolution_sql(connection)
-    rows = connection.execute(
-        f"""
-        WITH assessed AS (
-            SELECT e.*, ({assessment}) AS assessment, ({legacy}) AS legacy_assessment
-            FROM encounters e WHERE last_seen >= ?
-        )
-        SELECT
-            rule_id,
-            COUNT(*) AS total_episodes,
-            SUM(assessment = 'tracked_target') AS opportunities,
-            SUM(assessment = 'tracked_target' AND outcome != 'passed') AS violations,
-            SUM(assessment = 'tracked_target' AND outcome = 'prevented') AS prevented,
-            SUM(assessment = 'tracked_target' AND outcome = 'escaped') AS escaped,
-            SUM(assessment = 'unresolved_target') AS unresolved_target_episodes,
-            SUM(legacy_assessment) AS legacy_inferred_target_episodes,
-            COUNT(DISTINCT CASE WHEN assessment = 'tracked_target' THEN workflow_key END) AS distinct_targets,
-            GROUP_CONCAT(DISTINCT last_skill_revision) AS revisions,
-            MIN(first_seen) AS first_seen,
-            MAX(last_seen) AS last_seen
-        FROM assessed
-        GROUP BY rule_id
-        HAVING violations >= ? OR unresolved_target_episodes > 0
-        ORDER BY violations DESC, rule_id
-        """,
-        (cutoff, min_encounters),
-    ).fetchall()
+    _report_resolution_sql(connection)
+    enc_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(encounters)")
+    }
+    query = _REPORT_ENCOUNTERS_QUERIES["target_resolution" in enc_columns]
+    rows = connection.execute(query, (cutoff, min_encounters)).fetchall()
     result: list[dict[str, Any]] = []
     for row in rows:
         rule = RULES[row["rule_id"]]
@@ -1059,8 +1140,9 @@ def report_encounters(
 
 def _normalize_repo(value: str) -> str:
     value = value.strip().removesuffix(".git")
-    if value.startswith("git@github.com:"):
-        return value.split(":", 1)[1]
+    user, sep, host_path = value.partition("@")
+    if sep and user == "git" and host_path.startswith("github.com:"):
+        return host_path.split(":", 1)[1]
     match = re.search(r"github\.com[/:]([^/]+/[^/]+)$", value)
     if match:
         return match.group(1)
@@ -1089,10 +1171,10 @@ _CD_OPTION_TOKENS = frozenset({"-L", "-P", "-e", "-@"})
 def _cd_segment_directory(
     segment: list[str], current: str | None
 ) -> tuple[bool, str | None]:
-    """Interpret a shell segment as a ``cd`` builtin invocation.
+    """Interpret a shell segment as a cd builtin invocation.
 
-    Returns ``(is_cd, new_directory)``. ``new_directory`` is ``None`` when the
-    destination cannot be resolved statically: a dynamic value, ``cd -``, no
+    Returns (is_cd, new_directory). new_directory is None when the
+    destination cannot be resolved statically: a dynamic value, cd -, no
     argument, extra arguments, or a relative path from an unknown directory."""
     if not segment or segment[0] != "cd":
         return False, None
@@ -1276,8 +1358,8 @@ class _ExecutionContext:
 # The text is stable on purpose: identically wrapped retries normalize to the
 # same workflow key and dedupe into one episode. Verification stays fail-closed —
 # no eligible read can ever share a sentinel key, so a host- or scope-scrubbed
-# write keeps its readback obligation until the turn escapes; rerun the write
-# without the scrubbing wrapper (or with sudo -E) to make it verifiable.
+# write keeps its readback obligation until the turn escapes, unless the write
+# is rerun without environment scrubbing so its scope remains verifiable.
 # Unknown working directories remain None instead of becoming a filesystem
 # path: relative @file inputs then fail closed without touching the filesystem.
 WRAPPER_UNKNOWN_HOST_SENTINEL = "$SECQUOIA_WRAPPER_UNKNOWN_HOST"
@@ -1285,13 +1367,13 @@ WRAPPER_CWD_SENTINEL = "$SECQUOIA_WRAPPER_CWD"
 
 # These wrappers execute a following command, but only when their option grammar
 # is known. Unknown options fail closed: guessing whether they consume a value
-# can otherwise hide the real command or expose inert argument text as `gh`.
-# Launchers outside these tables (for example `find -exec`, `parallel`,
-# `script -c`, `ssh`, or `su -c`) are deliberately out of scope: their
-# prefixes never parse as executable, so nothing behind them can authorize a
-# write, and gh writes behind them stay untracked — the README's "workflow
-# guard, not a security sandbox" boundary. Extend a grammar rather than
-# loosening the parser when a new wrapper matters.
+# can otherwise hide the real command or expose inert argument text as "gh".
+# Launchers outside these tables — such as find -exec, parallel, script -c,
+# ssh, or su -c — are deliberately out of scope: their prefixes never parse as
+# executable, so nothing behind them can authorize a write, and gh writes behind
+# them stay untracked — the README's "workflow guard, not a security sandbox"
+# boundary. Extend a grammar rather than loosening the parser when a new wrapper
+# matters.
 EXEC_THROUGH_WRAPPERS = {
     "ionice": _ExecWrapperGrammar(
         value_options=frozenset({"-c", "-n", "--class", "--classdata"}),
@@ -1409,8 +1491,8 @@ EXEC_THROUGH_WRAPPERS = {
     ),
 }
 
-# xargs appends stdin-derived arguments, so a direct `xargs gh ...` command is
-# incomplete and stays untracked; a shell-wrapped `xargs bash -c 'gh ...'`
+# xargs appends stdin-derived arguments, so a direct "xargs gh ..." command is
+# incomplete and stays untracked, whereas a shell-wrapped "xargs bash -c 'gh ...'"
 # carries its full gh command inline and is scanned.
 SHELL_ONLY_EXEC_WRAPPERS = {
     "xargs": _ExecWrapperGrammar(
@@ -2154,7 +2236,7 @@ def _tokenize_shell_words(command: str) -> list[_ShellWord]:
 
 
 def _shell_command_argument(tokens: list[str], shell_index: int) -> str | None:
-    """Return the command following a shell's effective -c option."""
+    """Return the command following an effective shell -c option."""
     value_options = {"-o", "+o", "-O", "+O", "--init-file", "--rcfile"}
     index = shell_index + 1
     while index < len(tokens):
@@ -2438,9 +2520,9 @@ def _segments_containing_gh(
                     and context.read_success_coupled
                 )
                 yield normalized, read_eligible, context
-            # A `cd` segment changes the directory the following segments run
+            # A cd segment changes the directory the following segments run
             # in, but only when its terminator guarantees it took effect: after
-            # `||` the next command runs precisely because the cd failed, and a
+            # || means the next command runs precisely because the cd failed, and a
             # pipe confines the cd to its own subshell.
             if set(token) <= {";", "\n"} or token == "&&":
                 is_cd, cd_directory = _cd_segment_directory(
@@ -3186,8 +3268,8 @@ def classify_gh_operations(command: str, cwd: str) -> list[GhOperation]:
         if group == "api":
             kind = _api_kind(tokens, operation_cwd)
         elif group == "repo" and action == "set-default" and "--view" in tokens[3:]:
-            # `gh repo set-default --view` only prints the pinned repository;
-            # the shared conventions prescribe it as a read-only probe.
+            # gh repo set-default --view only prints the pinned repository,
+            # and the shared conventions prescribe it as a read-only probe.
             kind = "read"
         elif action in WRITE_ACTIONS.get(group, set()):
             kind = "write"
@@ -3254,11 +3336,11 @@ def _created_comment_readback_keys(
 ) -> str:
     """Key of the comment a successful write created, read from its response.
 
-    The prescribed readback of a new comment is the comment's own endpoint
+    The prescribed readback of a new comment is the endpoint of the comment itself
     (issues/comments/{id} or pulls/comments/{id}), which carries no issue or
     pull number, so it can only be matched to the pending write through the
     id the write returned. Prefer the html_url anchor, then the first top-level
-    "id" field, then a bare integer (a `--jq .id` projection). Ambiguous
+    "id" field, then a bare integer (such as --jq .id output). Ambiguous
     responses yield nothing rather than a guess.
     """
     kind = operation.created_comment_kind
@@ -3415,12 +3497,12 @@ _CONCRETE_RUN_KEY = re.compile(r"^(?P<prefix>github:[^:]+:[^:]+):run:[0-9a-f]{20
 def _equivalent_workflow_keys(workflow_key: str) -> tuple[str, ...]:
     """Keys whose read satisfies a live-state or readback check for this key.
 
-    The REST ``issues/{n}`` family cannot tell whether #n is an issue or a
-    pull request, so it is keyed ``issue-or-pull``. A GitHub number belongs to
+    The REST issues/{n} family cannot tell whether #n is an issue or a
+    pull request, so it is keyed issue-or-pull. A GitHub number belongs to
     exactly one of the two, so a read of either concrete kind proves the state
-    of an ``issue-or-pull`` write, and a read through the ambiguous family
-    proves either concrete kind. ``pull`` and ``issue`` stay distinct from each
-    other; the shared conventions prescribe ``issues/{n}/comments`` for PR
+    of an issue-or-pull write, and a read through the ambiguous family
+    proves either concrete kind. pull and issue stay distinct from each
+    other, while the shared conventions prescribe issues/{n}/comments for PR
     discussion comments, and without this equivalence no prescribed read could
     ever credit that write.
     """
@@ -4780,6 +4862,21 @@ def _owned_handler(handler: Any) -> bool:
     )
 
 
+def _extract_hook_runner(tokens: Sequence[str]) -> Path | None:
+    if not tokens:
+        return None
+    index = 1
+    while index < len(tokens) and tokens[index] == "-B":
+        index += 1
+    if (
+        index + 1 >= len(tokens)
+        or tokens[index].startswith("-")
+        or tokens[index + 1] != "hook"
+    ):
+        return None
+    return Path(tokens[index])
+
+
 def _remove_owned_hooks(
     document: dict[str, Any], scripts: Iterable[Path] | None = None
 ) -> bool:
@@ -4794,11 +4891,8 @@ def _remove_owned_hooks(
             command = shlex.split(handler["command"])
         except (TypeError, ValueError):
             return False
-        return (
-            len(command) > 2
-            and command[2] == "hook"
-            and str(Path(command[1]).resolve()) in allowed
-        )
+        runner = _extract_hook_runner(command)
+        return runner is not None and str(runner.resolve()) in allowed
 
     changed = False
     hooks = document.get("hooks")
@@ -4882,7 +4976,7 @@ def install_codex_hooks(
     document = _load_hooks(hooks_path)
     _remove_owned_hooks(document)
     command = (
-        f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} hook --agent codex "
+        f"{shlex.quote(sys.executable)} -B {shlex.quote(str(script))} hook --agent codex "
         f"--mode {mode} --installation-id {INSTALLATION_ID}"
     )
     handler = {
@@ -4920,7 +5014,7 @@ def install_claude_hooks(
     document = _load_hook_document(settings_path, {"hooks": {}})
     _remove_owned_hooks(document)
     command = (
-        f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} hook --agent claude "
+        f"{shlex.quote(sys.executable)} -B {shlex.quote(str(script))} hook --agent claude "
         f"--mode {mode} --installation-id {INSTALLATION_ID}"
     )
     handler = {"type": "command", "command": command, "timeout": 5}
@@ -4993,11 +5087,8 @@ def _remove_owned_antigravity_hooks(
             command = shlex.split(handler["command"])
         except (TypeError, ValueError):
             return False
-        return (
-            len(command) > 2
-            and command[2] == "hook"
-            and str(Path(command[1]).resolve()) in allowed
-        )
+        runner = _extract_hook_runner(command)
+        return runner is not None and str(runner.resolve()) in allowed
 
     changed = False
     for hook_name in list(document):
@@ -5047,7 +5138,7 @@ def install_antigravity_hooks(
     document = _load_antigravity_hook_document(hooks_path)
     _remove_owned_antigravity_hooks(document)
     base_command = (
-        f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} hook --agent antigravity "
+        f"{shlex.quote(sys.executable)} -B {shlex.quote(str(script))} hook --agent antigravity "
         f"--mode {mode} --installation-id {INSTALLATION_ID}"
     )
     hook_spec = {

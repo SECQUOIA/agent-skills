@@ -1,6 +1,9 @@
 ---
 name: gh-pages-deployment
 description: Diagnose stale or missing GitHub Pages and hosted documentation sites. Use for deployment checks or requested deployment changes; diagnosis alone does not authorize settings or workflow changes.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # Check a documentation deployment

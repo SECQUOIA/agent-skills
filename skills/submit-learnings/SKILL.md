@@ -1,6 +1,9 @@
 ---
 name: submit-learnings
 description: Submit accumulated skill learnings by pushing the personal branch and creating a PR or posting a new status comment. Preserves existing PR text; does not review or merge.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # Submit Learnings

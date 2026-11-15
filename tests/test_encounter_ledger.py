@@ -3041,12 +3041,57 @@ class EncounterLedgerTests(unittest.TestCase):
                 handlers = [handler for groups in document["hooks"].values()
                             for group in groups for handler in group["hooks"]]
                 for handler in handlers:
-                    self.assertEqual(shlex.split(handler["command"])[:3],
-                                     [executable, str(script), "hook"])
+                    self.assertEqual(shlex.split(handler["command"])[:4],
+                                     [executable, "-B", str(script), "hook"])
                     self.assertTrue(ledger._owned_handler(handler))
                 self.assertFalse(ledger._remove_owned_hooks(document, [Path("/another/script.py")]))
                 self.assertTrue(ledger._remove_owned_hooks(document, [script]))
                 self.assertEqual(document["hooks"], {})
+
+    def test_legacy_non_dash_b_hooks_are_removable_and_forged_flags_are_ignored(self):
+        script = Path(self.temporary.name) / "legacy ledger.py"
+        script.write_text("# runner\n", encoding="utf-8")
+        legacy_cmd = (
+            f"python3 {shlex.quote(str(script))} hook --agent codex "
+            f"--mode audit --installation-id {ledger.INSTALLATION_ID}"
+        )
+        forged_cmd = (
+            f"python3 -c 'import os' hook --agent codex "
+            f"--mode audit --installation-id {ledger.INSTALLATION_ID}"
+        )
+        document = {
+            "hooks": {
+                "Stop": [
+                    {
+                        "hooks": [
+                            {"type": "command", "command": legacy_cmd},
+                            {"type": "command", "command": forged_cmd},
+                        ]
+                    }
+                ]
+            }
+        }
+        self.assertTrue(ledger._remove_owned_hooks(document, [script]))
+        self.assertEqual(
+            document["hooks"]["Stop"][0]["hooks"],
+            [{"type": "command", "command": forged_cmd}],
+        )
+
+        agy_doc = {
+            "secquoia-hooks": {
+                "Stop": [
+                    {
+                        "type": "command",
+                        "command": (
+                            f"python3 {shlex.quote(str(script))} hook --agent antigravity "
+                            f"--mode audit --installation-id {ledger.INSTALLATION_ID} --event Stop"
+                        ),
+                    }
+                ]
+            }
+        }
+        self.assertTrue(ledger._remove_owned_antigravity_hooks(agy_doc, [script]))
+        self.assertNotIn("secquoia-hooks", agy_doc)
 
     def test_codex_hook_install_is_idempotent_and_preserves_other_hooks(self):
         codex_home = Path(self.temporary.name) / "codex"

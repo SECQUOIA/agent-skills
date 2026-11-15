@@ -1,6 +1,9 @@
 ---
 name: gh-merge-pr
 description: Merge a GitHub PR after verifying live head, CI, review gates, and mergeability. Handles requested completion and issue handoff; honors the repository's merge policy.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # GitHub Merge PR

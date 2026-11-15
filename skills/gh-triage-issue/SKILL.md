@@ -1,6 +1,9 @@
 ---
 name: gh-triage-issue
 description: Reproduce a GitHub bug issue, produce a failing regression test and acceptance criteria, and post triage evidence before implementation. Does not land a source fix or open a PR.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # GitHub Triage Issue

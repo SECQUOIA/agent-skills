@@ -1,6 +1,9 @@
 ---
 name: gh-address-review-comments
 description: Address GitHub PR review feedback, push fixes, and publish resolutions. Use for requested changes or unresolved comments; explicit local-only or commit-and-push limits remain binding.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # GitHub Address Review Comments

@@ -29,8 +29,13 @@ class MetadataTests(unittest.TestCase):
         self.entry.write_text(f"---\n{metadata}\n---\n{body}", encoding="utf-8")
 
     def test_valid_optional_fields_and_unicode_description(self):
-        self.write_skill("name: sample-skill\ndescription: " + "é" * 1024
-                         + "\nlicense: MIT\nallowed-tools: Bash\nmetadata:\n  purpose: example")
+        self.write_skill(
+            "name: sample-skill\ndescription: "
+            + "é" * 1024
+            + "\nlicense: MIT\nallowed-tools: Bash\nmetadata:\n"
+            + "  author: David E. Bernal Neira <dbernaln@purdue.edu>\n"
+            + "  purpose: example"
+        )
         self.assertEqual(validator.validate(self.root), [])
 
     def test_invalid_frontmatter_fails(self):
@@ -45,6 +50,11 @@ class MetadataTests(unittest.TestCase):
             "name: sample-skill\ndescription: [unterminated",
             "name: sample-skill\ndescription: <placeholder>",
             "name: sample-skill\ndescription: '[TODO: fill in]'",
+            "name: sample-skill\ndescription: Valid.\nlicense: ''",
+            "name: sample-skill\ndescription: Valid.\nlicense: [MIT]",
+            "name: sample-skill\ndescription: Valid.\nlicense: <MIT>",
+            "name: sample-skill\ndescription: Valid.\nmetadata: not-a-mapping",
+            "name: sample-skill\ndescription: Valid.\nmetadata:\n  author: ''",
             "- not a mapping",
         ]
         for metadata in examples:

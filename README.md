@@ -147,7 +147,7 @@ observed labels only; do not infer them from a default configuration.
 From the repository:
 
 ```bash
-python3 skills/apply-conversation-lessons/scripts/encounter_ledger.py report --json
+python3 -B skills/apply-conversation-lessons/scripts/encounter_ledger.py report --json
 ```
 
 Reports retain episode totals and add `runtime_observations` grouped by recorded

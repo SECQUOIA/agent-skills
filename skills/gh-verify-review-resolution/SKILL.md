@@ -1,6 +1,9 @@
 ---
 name: gh-verify-review-resolution
 description: Check whether a PR addresses existing review feedback or a referenced report. Read-only by default; post an outcome or perform bounded closeout only when explicitly requested.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # GitHub Verify Review Resolution

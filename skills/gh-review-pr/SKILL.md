@@ -1,6 +1,9 @@
 ---
 name: gh-review-pr
 description: Post a maintainer review on a GitHub PR when requested. Use explain-pr-to-me for explanations and gh-verify-review-resolution for checking existing feedback.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # GitHub Maintainer PR Review

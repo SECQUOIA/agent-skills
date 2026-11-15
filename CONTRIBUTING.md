@@ -34,8 +34,11 @@ That local guard is an additional check, not a substitute for reviewed PRs.
    procedure, rechecks the remote personal head, and pushes with a specific lease
    when the verified rebase requires one. It opens or updates one learnings PR;
    it does not review or merge it.
-4. The reviewer uses `gh-review-pr` and `gh-merge-pr`. After merging, contributors
-   run `sync-secquoia-skills` again to pick up the reviewed result.
+4. The reviewer uses `gh-review-pr` and `gh-merge-pr`. Merging into the shared
+   repository runs the merge-only NVIDIA skill scanner (`scripts/run_skill_scanner.py`
+   and `.github/workflows/skill-merge-scan.yml`) rather than invoking it on
+   intermediate lesson, sync, or PR-update steps. After merging, contributors run
+   `sync-secquoia-skills` again to pick up the reviewed result.
 
 Keep each lesson small enough to review independently. Leave backup branches local.
 Avoid replacing this workflow with a bare `git pull` or unprotected rebase on a
@@ -69,6 +72,14 @@ python3 -B scripts/validate_skill_metadata.py
 python3 -B -m unittest discover -s tests
 bash -n install.sh uninstall.sh
 ```
+
+Routine local edits, `sync-secquoia-skills`, `submit-learnings`, and `pull_request`
+CI (`validate-skills.yml`) keep this fast validation loop. Static security and
+quality scanning via NVIDIA `SkillEvaluator` + `SkillSpector` runs only at the PR
+merge boundary (`.github/workflows/skill-merge-scan.yml` on `merge_group`,
+`workflow_dispatch`, and `main` merges, or locally before merging via
+`python3 -B scripts/run_skill_scanner.py` in a scanner-equipped environment using
+the audited `.github/skillspector-baseline.yaml`).
 
 Behavioral evaluations provide different evidence from these deterministic tests.
 Report what actually ran and any untested model/client combinations.

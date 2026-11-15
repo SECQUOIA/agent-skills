@@ -1,6 +1,9 @@
 ---
 name: sync-secquoia-skills
 description: Sync merged shared skills into the local managed clone, preserving pending learnings and refreshing installed skills. Does not push or publish.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # Sync Skills

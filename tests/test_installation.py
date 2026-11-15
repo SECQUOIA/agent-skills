@@ -682,6 +682,68 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("mixes this checkout's hooks (audit) with another checkout or missing runner (enforce)", mixed_siblings.stdout)
         self.assertIn("--codex-hooks=enforce", mixed_siblings.stdout)
 
+    def test_install_prunes_bytecode_safely_and_emits_dash_b_hook_commands(self):
+        external = self.base / "external_bytecode"
+        (external / "__pycache__").mkdir(parents=True)
+        external_pyc = external / "__pycache__/keep.cpython-313.pyc"
+        external_pyc.write_bytes(b"keep")
+
+        source_cache = self.ledger_source / "scripts/__pycache__"
+        source_cache.mkdir(parents=True)
+        (source_cache / "encounter_ledger.cpython-313.pyc").write_bytes(b"stale")
+        (self.ledger_source / "scripts/stray.pyo").write_bytes(b"stale")
+        (self.ledger_source / "scripts/external_link").symlink_to(
+            external, target_is_directory=True
+        )
+
+        (self.home / ".gemini").mkdir(parents=True)
+        self.run_script("install", "--hooks=audit")
+        self.assertFalse(source_cache.exists())
+        self.assertFalse((self.ledger_source / "scripts/stray.pyo").exists())
+        self.assertFalse(
+            list((self.repo / "scripts").rglob("*.pyc")),
+            "install.sh must not write bytecode into repo scripts",
+        )
+        self.assertTrue(external_pyc.is_file())
+        (self.ledger_source / "scripts/external_link").unlink()
+
+        for handler in self.hooks(self.home / ".codex/hooks.json"):
+            tokens = shlex.split(handler["command"])
+            self.assertEqual(tokens[1], "-B")
+            self.assertEqual(tokens[3], "hook")
+        for handler in self.hooks(self.home / ".claude/settings.json"):
+            tokens = shlex.split(handler["command"])
+            self.assertEqual(tokens[1], "-B")
+            self.assertEqual(tokens[3], "hook")
+        agy_doc = json.loads((self.home / ".gemini/config/hooks.json").read_text())
+        agy_tokens = shlex.split(
+            agy_doc["secquoia-hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        )
+        self.assertEqual(agy_tokens[1], "-B")
+        self.assertEqual(agy_tokens[3], "hook")
+
+        # Copy-mode repeat install also cleans stale bytecode inside unchanged owned copies.
+        copy_home = self.base / "copy_home"
+        subprocess.run(
+            ["bash", str(self.repo / "install.sh"), "--user-home", str(copy_home), "--copy"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        copied_cache = (
+            copy_home
+            / ".agents/skills/apply-conversation-lessons/scripts/__pycache__"
+        )
+        copied_cache.mkdir(parents=True)
+        (copied_cache / "stale.pyc").write_bytes(b"stale")
+        subprocess.run(
+            ["bash", str(self.repo / "install.sh"), "--user-home", str(copy_home), "--copy"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertFalse(copied_cache.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

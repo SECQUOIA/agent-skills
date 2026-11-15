@@ -1,6 +1,9 @@
 ---
 name: gh-workflow-conventions
 description: Shared policy for gh-* workflows and direct GitHub writes. Read with the applicable workflow, or when asked about common rules; this reference does not authorize an action by itself.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # GitHub Workflow Conventions
@@ -94,6 +97,14 @@ adding helpers or recommending a different model or effort, read
 | Selecting or assessing verification | [Test quality](references/test-quality.md) |
 | Replacing scientific datasets, freezing research snapshots, verifying generated deliverables, or inventorying personal-record deliveries | [Artifact verification](references/artifact-verification.md) |
 | Editing, staging, pushing, generated files, cleanup, or branch-deletion policies | [Change hygiene](references/change-hygiene.md) |
+
+## Available Scripts
+
+Run bundled helpers with `python3 -B`:
+
+| Script | Purpose | Arguments |
+|---|---|---|
+| `scripts/check_html_fragments.py` | Read-only offline check of owned static HTML fragment/anchor links under a rendered site root | `<rendered-root> --base-url <https://host/base/>` |
 
 ## Handoff
 

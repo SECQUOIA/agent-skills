@@ -1,6 +1,9 @@
 ---
 name: gh-issue-to-pr
 description: Implement one or more GitHub issues as focused PRs, or continue their initial implementation. Groups coherent work, verifies changes, opens draft PRs, and checks CI.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # GitHub Issue To PR

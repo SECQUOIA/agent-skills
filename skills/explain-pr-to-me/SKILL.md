@@ -1,6 +1,9 @@
 ---
 name: explain-pr-to-me
 description: Explain a GitHub PR technically and in plain language, including current blockers and relevant review history. Read-only; use gh-review-pr to post a new maintainer review.
+license: MIT
+metadata:
+  author: David E. Bernal Neira <dbernaln@purdue.edu>
 ---
 
 # Explain PR To Me

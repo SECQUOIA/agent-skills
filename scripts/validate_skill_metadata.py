@@ -95,6 +95,20 @@ def validate_frontmatter(path: Path, text: str, errors: list[str]) -> None:
         errors.append(f"{path}: description cannot contain angle brackets")
     elif description.lstrip().startswith("[TODO:"):
         errors.append(f"{path}: description contains an unfinished placeholder")
+    if "license" in value:
+        lic = value["license"]
+        if not isinstance(lic, str) or not lic.strip():
+            errors.append(f"{path}: license must be a nonempty string")
+        elif "<" in lic or ">" in lic:
+            errors.append(f"{path}: license cannot contain angle brackets")
+    if "metadata" in value:
+        meta = value["metadata"]
+        if not isinstance(meta, dict):
+            errors.append(f"{path}: metadata field must be a YAML mapping")
+        elif "author" in meta and (
+            not isinstance(meta["author"], str) or not meta["author"].strip()
+        ):
+            errors.append(f"{path}: metadata.author must be a nonempty string")
 
 
 def validate_sidecar(path: Path, text: str, errors: list[str]) -> None:
