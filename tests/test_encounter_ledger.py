@@ -3455,6 +3455,189 @@ class EncounterLedgerTests(unittest.TestCase):
             "PreInvocation",
         )
 
+    def test_antigravity_null_and_malformed_continuation_active_escape_stop_loop(self):
+        state_dir = Path(self.temporary.name) / "antigravity_null_cont_state"
+
+        def write_event(conv_id: str, tool_id: str, step: int) -> None:
+            ledger.run_hook(
+                {
+                    "conversationId": conv_id,
+                    "workspacePaths": ["/tmp/test-repo"],
+                    "hookEventName": "PostToolUse",
+                    "toolCall": {
+                        "id": tool_id,
+                        "name": "run_command",
+                        "args": {"CommandLine": "gh pr close 101 --repo owner/repo"},
+                    },
+                    "stepIdx": step,
+                },
+                agent="antigravity",
+                mode="enforce",
+                explicit_state_dir=str(state_dir),
+            )
+
+        # 1. continuationActive=None falls back to executionNum > 1 and clears pending state
+        write_event("ag-null", "toolu_null_1", 1)
+        res1 = ledger.run_hook(
+            {
+                "conversationId": "ag-null",
+                "workspacePaths": ["/tmp/test-repo"],
+                "hookEventName": "Stop",
+                "continuationActive": None,
+                "executionNum": 1,
+                "terminationReason": "NO_TOOL_CALL",
+            },
+            agent="antigravity",
+            mode="enforce",
+            explicit_state_dir=str(state_dir),
+        )
+        self.assertEqual(res1["decision"], "continue")
+
+        res2 = ledger.run_hook(
+            {
+                "conversationId": "ag-null",
+                "workspacePaths": ["/tmp/test-repo"],
+                "hookEventName": "Stop",
+                "continuationActive": None,
+                "executionNum": 2,
+                "terminationReason": "NO_TOOL_CALL",
+            },
+            agent="antigravity",
+            mode="enforce",
+            explicit_state_dir=str(state_dir),
+        )
+        self.assertEqual(res2["decision"], "stop")
+
+        res3 = ledger.run_hook(
+            {
+                "conversationId": "ag-null",
+                "workspacePaths": ["/tmp/test-repo"],
+                "hookEventName": "Stop",
+                "continuationActive": None,
+                "executionNum": 3,
+                "terminationReason": "NO_TOOL_CALL",
+            },
+            agent="antigravity",
+            mode="enforce",
+            explicit_state_dir=str(state_dir),
+        )
+        self.assertEqual(res3, {})
+
+        # 2. String "false" does not suppress initial enforcement and still escapes via executionNum
+        write_event("ag-str", "toolu_str_1", 1)
+        res_str_0 = ledger.run_hook(
+            {
+                "conversationId": "ag-str",
+                "workspacePaths": ["/tmp/test-repo"],
+                "hookEventName": "Stop",
+                "continuationActive": "false",
+                "executionNum": 0,
+                "terminationReason": "NO_TOOL_CALL",
+            },
+            agent="antigravity",
+            mode="enforce",
+            explicit_state_dir=str(state_dir),
+        )
+        self.assertEqual(res_str_0["decision"], "continue")
+
+        res_str_2 = ledger.run_hook(
+            {
+                "conversationId": "ag-str",
+                "workspacePaths": ["/tmp/test-repo"],
+                "hookEventName": "Stop",
+                "continuationActive": "false",
+                "executionNum": 2,
+                "terminationReason": "NO_TOOL_CALL",
+            },
+            agent="antigravity",
+            mode="enforce",
+            explicit_state_dir=str(state_dir),
+        )
+        self.assertEqual(res_str_2["decision"], "stop")
+
+        # 3. Malformed executionNum values do not crash Stop handling
+        write_event("ag-bad-exec", "toolu_bad_exec_1", 1)
+        for bad_exec in (None, "not-an-int", True, -1):
+            res_bad = ledger.run_hook(
+                {
+                    "conversationId": "ag-bad-exec",
+                    "workspacePaths": ["/tmp/test-repo"],
+                    "hookEventName": "Stop",
+                    "continuationActive": None,
+                    "executionNum": bad_exec,
+                    "terminationReason": "NO_TOOL_CALL",
+                },
+                agent="antigravity",
+                mode="enforce",
+                explicit_state_dir=str(state_dir),
+            )
+            self.assertEqual(res_bad["decision"], "continue")
+
+    def test_antigravity_malformed_tool_ids_fall_back_without_creation_collision(self):
+        step_7_id = ledger._tool_use_id({"stepIdx": 7})
+        self.assertTrue(step_7_id)
+        self.assertEqual(ledger._tool_use_id({"stepIdx": "7"}), step_7_id)
+
+        for malformed in ("", "   ", None, 0, 17, {}, {"bad": 1}, [], ["bad"], True):
+            with self.subTest(malformed=malformed):
+                self.assertEqual(
+                    ledger._tool_use_id(
+                        {"tool_use_id": malformed, "toolCall": {"id": malformed}, "stepIdx": 7}
+                    ),
+                    step_7_id,
+                )
+        for bad_step in (None, "", "   ", "null", -1, True, [], {}):
+            with self.subTest(bad_step=bad_step):
+                self.assertEqual(
+                    ledger._tool_use_id({"toolCall": {"id": "   "}, "stepIdx": bad_step}),
+                    "",
+                )
+
+        state_dir = Path(self.temporary.name) / "antigravity_malformed_tool_id_state"
+        for step in (3, 7):
+            ledger.run_hook(
+                {
+                    "conversationId": "ag-malformed-ids",
+                    "workspacePaths": ["/tmp/test-repo"],
+                    "hookEventName": "PostToolUse",
+                    "toolCall": {
+                        "id": "   ",
+                        "name": "run_command",
+                        "args": {"CommandLine": "gh pr create --repo owner/repo --title t --body b"},
+                    },
+                    "stepIdx": step,
+                },
+                agent="antigravity",
+                mode="audit",
+                explicit_state_dir=str(state_dir),
+            )
+
+        # Repeated delivery of a single valid toolCall.id is still deduplicated
+        for step in (11, 12):
+            ledger.run_hook(
+                {
+                    "conversationId": "ag-malformed-ids",
+                    "workspacePaths": ["/tmp/test-repo"],
+                    "hookEventName": "PostToolUse",
+                    "toolCall": {
+                        "id": "toolu_valid_dup",
+                        "name": "run_command",
+                        "args": {"CommandLine": "gh pr create --repo owner/repo --title t --body b"},
+                    },
+                    "stepIdx": step,
+                },
+                agent="antigravity",
+                mode="audit",
+                explicit_state_dir=str(state_dir),
+            )
+
+        with contextlib.closing(ledger.connect_database(str(state_dir))) as connection:
+            row = connection.execute(
+                "SELECT pending_count FROM hook_activity WHERE pending_write = 1"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["pending_count"], 3)
+
 
 def claude_payload(event: str, command: str = "", response=None, **extra):
     """A payload in the exact shape Claude Code v2.1.x sends: no turn_id, and

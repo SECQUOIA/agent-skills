@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -439,6 +441,172 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("mixed modes across clients", mixed.stdout)
         claude_cmds = [h["command"] for h in self.hooks(self.home / ".claude/settings.json")]
         self.assertTrue(all("--mode enforce" in c for c in claude_cmds))
+
+    def test_hook_parity_preserves_custom_roots_copy_and_prevents_mode_downgrade(self):
+        private = self.repo / "skills-local/private-skill"
+        private.mkdir(parents=True)
+        (private / "SKILL.md").write_text("---\nname: private-skill\ndescription: private\n---\n")
+
+        custom_codex = self.base / "custom codex"
+        custom_codex_skills = custom_codex / "custom skills"
+        custom_agy = self.base / "custom gemini config"
+
+        # 1. Custom roots + --copy + --include-local + enforce on Codex only
+        self.run_script(
+            "install",
+            "--copy",
+            "--include-local",
+            f"--codex-home={custom_codex}",
+            f"--codex-skills-dir={custom_codex_skills}",
+            f"--antigravity-home={custom_agy}",
+            "--codex-hooks=enforce",
+        )
+        drift = self.run_script(
+            "install",
+            "--copy",
+            "--include-local",
+            f"--codex-home={custom_codex}",
+            f"--codex-skills-dir={custom_codex_skills}",
+            f"--antigravity-home={custom_agy}",
+        )
+        match = re.search(r"Run (\./install\.sh .+?) to align all active clients\.", drift.stdout)
+        self.assertIsNotNone(match, drift.stdout)
+        tokens = shlex.split(match.group(1))
+        self.assertEqual(tokens[0], "./install.sh")
+        self.assertIn("--copy", tokens)
+        self.assertIn("--include-local", tokens)
+        self.assertIn(f"--user-home={self.home}", tokens)
+        self.assertIn(f"--codex-home={custom_codex}", tokens)
+        self.assertIn(f"--codex-skills-dir={custom_codex_skills}", tokens)
+        self.assertIn(f"--antigravity-home={custom_agy}", tokens)
+        self.assertIn("--hooks=enforce", tokens)
+
+        # Executing the exact suggested command aligns custom targets without touching default roots
+        repair = subprocess.run(
+            ["bash", str(self.repo / "install.sh"), *tokens[1:]],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        self.assertEqual(repair.returncode, 0, repair.stdout + repair.stderr)
+        self.assertNotIn("Hook parity note:", repair.stdout)
+        self.assertFalse((self.home / ".codex/hooks.json").exists())
+        self.assertFalse((self.home / ".gemini/config/hooks.json").exists())
+        agy_doc = json.loads((custom_agy / "hooks.json").read_text())
+        self.assertIn(
+            "--mode enforce",
+            agy_doc["secquoia-hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+        )
+        self.assertFalse((custom_agy / "skills/sample-skill").is_symlink())
+        self.assertTrue((custom_agy / "skills/private-skill").is_dir())
+
+        # 2. Mixed modes (Codex=enforce, Claude=audit) + missing Antigravity preserves Codex=enforce
+        mixed_home = self.base / "mixed home"
+        (mixed_home / ".gemini").mkdir(parents=True)
+        for args in (
+            ("--codex-hooks=enforce", "--claude-hooks=audit"),
+            (),
+        ):
+            res = subprocess.run(
+                ["bash", str(self.repo / "install.sh"), "--user-home", str(mixed_home), *args],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertIn("--antigravity-hooks=audit", res.stdout)
+        self.assertIn("without changing existing modes", res.stdout)
+        preserve_match = re.search(
+            r"Run (\./install\.sh .+?) to configure the remaining client\(s\)",
+            res.stdout,
+        )
+        self.assertIsNotNone(preserve_match, res.stdout)
+        preserve_tokens = shlex.split(preserve_match.group(1))
+        preserve_run = subprocess.run(
+            ["bash", str(self.repo / "install.sh"), *preserve_tokens[1:]],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        self.assertEqual(preserve_run.returncode, 0, preserve_run.stdout + preserve_run.stderr)
+        codex_cmds = [h["command"] for h in self.hooks(mixed_home / ".codex/hooks.json")]
+        self.assertTrue(all("--mode enforce" in c for c in codex_cmds))
+        agy_mixed_doc = json.loads((mixed_home / ".gemini/config/hooks.json").read_text())
+        self.assertIn(
+            "--mode audit",
+            agy_mixed_doc["secquoia-hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+        )
+
+    def test_hook_parity_reports_malformed_disabled_and_foreign_checkout_configs(self):
+        # 1. Malformed config when no client is configured still emits warning without leaking contents
+        agy_hooks = self.home / ".gemini/config/hooks.json"
+        agy_hooks.parent.mkdir(parents=True)
+        agy_hooks.write_text("{broken-json: SECRET_TOKEN_123")
+        malformed_only = self.run_script("install")
+        self.assertIn("Hook parity warning: invalid hook configuration for Antigravity", malformed_only.stdout)
+        self.assertIn("invalid JSON", malformed_only.stdout)
+        self.assertNotIn("SECRET_TOKEN_123", malformed_only.stdout)
+
+        # 2. Valid Codex + malformed Antigravity + absent Claude recommends --claude-hooks=audit safely
+        with_codex = self.run_script("install", "--codex-hooks=audit")
+        self.assertIn("Hook parity warning: invalid hook configuration for Antigravity", with_codex.stdout)
+        self.assertIn("--claude-hooks=audit", with_codex.stdout)
+        self.assertNotIn("Run ./install.sh --hooks=audit", with_codex.stdout)
+
+        # 3. Disabled Antigravity hook ("enabled": false) is reported as disabled rather than configured
+        self.run_script("install", "--claude-hooks=audit")
+        agy_hooks.write_text(
+            json.dumps(
+                {
+                    "secquoia-hooks": {
+                        "enabled": False,
+                        "Stop": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    f"python3 '{self.antigravity / 'apply-conversation-lessons/scripts/encounter_ledger.py'}'"
+                                    " hook --agent antigravity --mode audit --installation-id secquoia-encounter-ledger --event Stop"
+                                ),
+                            }
+                        ],
+                    }
+                }
+            )
+        )
+        disabled = self.run_script("install")
+        self.assertIn("enabled: false", disabled.stdout)
+
+        # 4. Foreign checkout runner in Codex is detected rather than counted as owned
+        foreign_script = self.base / "foreign_repo/skills/apply-conversation-lessons/scripts/encounter_ledger.py"
+        foreign_script.parent.mkdir(parents=True)
+        foreign_script.write_text("# foreign\n")
+        (self.home / ".codex/hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": (
+                                            f"python3 '{foreign_script}' hook --agent codex"
+                                            " --mode audit --installation-id secquoia-encounter-ledger"
+                                        ),
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        agy_hooks.unlink()
+        foreign = self.run_script("install")
+        self.assertIn("other checkout or missing runner", foreign.stdout)
 
 
 if __name__ == "__main__":

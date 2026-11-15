@@ -3772,14 +3772,34 @@ def _advance_session_epoch(connection: sqlite3.Connection, session_id: str) -> N
         )
 
 
+def _nonblank_string_id(raw: Any) -> str:
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
+def _nonnegative_int(raw: Any) -> int | None:
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+        return raw
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    return None
+
+
 def _tool_use_id(payload: dict[str, Any]) -> str:
-    value = payload.get("tool_use_id")
+    value = _nonblank_string_id(payload.get("tool_use_id"))
     if not value:
         tool_call = payload.get("toolCall")
         if isinstance(tool_call, dict):
-            value = tool_call.get("id")
+            value = _nonblank_string_id(tool_call.get("id"))
     if not value and "stepIdx" in payload:
-        value = f"step-{payload['stepIdx']}"
+        step_idx = _nonnegative_int(payload["stepIdx"])
+        if step_idx is not None:
+            value = f"step-{step_idx}"
     return _runtime_id("tool", value) if value else ""
 
 
@@ -4528,11 +4548,12 @@ def _stop(
         # that cannot perform the readback (for example, gh became
         # unavailable). The re-entry downgrades to an escape with an advisory.
         if agent == "antigravity":
-            continuation = (
-                bool(payload["continuationActive"])
-                if "continuationActive" in payload
-                else payload.get("executionNum", 1) > 1
-            )
+            raw_continuation = payload.get("continuationActive")
+            if isinstance(raw_continuation, bool):
+                continuation = raw_continuation
+            else:
+                execution_num = _nonnegative_int(payload.get("executionNum"))
+                continuation = execution_num is not None and execution_num > 1
             already_continued = (
                 continuation
                 or payload.get("terminationReason")
@@ -4544,10 +4565,10 @@ def _stop(
                     "USER_CANCELED",
                     "ERROR",
                 }
-                or bool(payload.get("stop_hook_active"))
+                or payload.get("stop_hook_active") is True
             )
         else:
-            already_continued = bool(payload.get("stop_hook_active"))
+            already_continued = payload.get("stop_hook_active") is True
         should_block = mode == "enforce" and not already_continued
         outcome = "prevented" if should_block else "escaped"
         for row in pending:

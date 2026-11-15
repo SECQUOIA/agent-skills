@@ -19,8 +19,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 
 MARKER = ".secquoia-install.json"
@@ -324,35 +326,87 @@ def run_hooks(
             subprocess.run([sys.executable, *command], check=True)
 
 
-def _extract_mode_from_command(command: str) -> str | None:
+class HookConfigState(NamedTuple):
+    status: str  # "configured", "absent", "disabled", "foreign", "invalid"
+    mode: str | None = None
+    detail: str | None = None
+
+
+def owned_hook_scripts(repo: Path, roots: list[Path]) -> set[Path]:
+    relative = Path("apply-conversation-lessons/scripts/encounter_ledger.py")
+    source_script = (repo / "skills" / relative).resolve()
+    allowed = {source_script}
+    for root in unique_roots(roots):
+        if owned(root / relative.parts[0], repo / "skills" / relative.parts[0]):
+            allowed.add((root / relative).resolve())
+    return allowed
+
+
+def _classify_handler_command(
+    command: str, allowed_scripts: set[Path] | None = None
+) -> tuple[str, str | None]:
     if HOOK_INSTALLATION_ID not in command:
-        return None
+        return ("other", None)
     try:
         tokens = shlex.split(command)
     except ValueError:
-        return "configured"
+        return ("malformed", None)
+    mode = "configured"
     for index, token in enumerate(tokens):
         if token == "--mode" and index + 1 < len(tokens):
-            return tokens[index + 1]
+            mode = tokens[index + 1]
+            break
         if token.startswith("--mode="):
-            return token.split("=", 1)[1]
-    return "configured"
+            mode = token.split("=", 1)[1]
+            break
+    if allowed_scripts is not None:
+        if len(tokens) <= 2 or tokens[2] != "hook":
+            return ("foreign", mode)
+        runner = Path(tokens[1])
+        try:
+            is_valid_runner = runner.is_file() and runner.resolve() in allowed_scripts
+        except OSError:
+            is_valid_runner = False
+        if not is_valid_runner:
+            return ("foreign", mode)
+    return ("owned", mode)
 
 
-def installed_hook_mode(path: Path, *, antigravity: bool = False) -> str | None:
-    if not path.is_file():
-        return None
+def inspect_hook_config(
+    path: Path,
+    *,
+    antigravity: bool = False,
+    allowed_scripts: set[Path] | None = None,
+) -> HookConfigState:
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+        exists = path.exists() or path.is_symlink()
+    except OSError as exc:
+        return HookConfigState("invalid", detail=f"unreadable ({type(exc).__name__})")
+    if not exists:
+        return HookConfigState("absent")
+    if not path.is_file():
+        return HookConfigState("invalid", detail="not a regular file")
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return HookConfigState("invalid", detail=f"unreadable ({type(exc).__name__})")
+    try:
+        document = json.loads(raw)
+    except ValueError:
+        return HookConfigState("invalid", detail="invalid JSON")
     if not isinstance(document, dict):
-        return None
-    modes: set[str] = set()
+        return HookConfigState("invalid", detail="top-level JSON value must be an object")
+
+    owned_modes: set[str] = set()
+    disabled_modes: set[str] = set()
+    foreign_modes: set[str] = set()
+    malformed_cmd = False
+
     if antigravity:
         for spec in document.values():
-            if not isinstance(spec, dict) or spec.get("enabled") is False:
+            if not isinstance(spec, dict):
                 continue
+            is_disabled = spec.get("enabled") is False
             for items in spec.values():
                 if not isinstance(items, list):
                     continue
@@ -362,10 +416,24 @@ def installed_hook_mode(path: Path, *, antigravity: bool = False) -> str | None:
                     handlers = item.get("hooks") if isinstance(item.get("hooks"), list) else [item]
                     for handler in handlers:
                         if isinstance(handler, dict) and isinstance(handler.get("command"), str):
-                            mode = _extract_mode_from_command(handler["command"])
-                            if mode:
-                                modes.add(mode)
+                            kind, mode = _classify_handler_command(
+                                handler["command"], allowed_scripts
+                            )
+                            if kind == "owned" and mode:
+                                if is_disabled:
+                                    disabled_modes.add(mode)
+                                else:
+                                    owned_modes.add(mode)
+                            elif kind == "foreign" and mode:
+                                if is_disabled:
+                                    disabled_modes.add(mode)
+                                else:
+                                    foreign_modes.add(mode)
+                            elif kind == "malformed":
+                                malformed_cmd = True
     else:
+        if "hooks" in document and not isinstance(document["hooks"], dict):
+            return HookConfigState("invalid", detail="'hooks' field must be a JSON object")
         hooks = document.get("hooks")
         if isinstance(hooks, dict):
             for groups in hooks.values():
@@ -376,50 +444,232 @@ def installed_hook_mode(path: Path, *, antigravity: bool = False) -> str | None:
                         continue
                     for handler in group["hooks"]:
                         if isinstance(handler, dict) and isinstance(handler.get("command"), str):
-                            mode = _extract_mode_from_command(handler["command"])
-                            if mode:
-                                modes.add(mode)
-    if not modes:
-        return None
-    return next(iter(modes)) if len(modes) == 1 else "/".join(sorted(modes))
+                            kind, mode = _classify_handler_command(
+                                handler["command"], allowed_scripts
+                            )
+                            if kind == "owned" and mode:
+                                owned_modes.add(mode)
+                            elif kind == "foreign" and mode:
+                                foreign_modes.add(mode)
+                            elif kind == "malformed":
+                                malformed_cmd = True
+
+    if owned_modes:
+        mode_str = next(iter(owned_modes)) if len(owned_modes) == 1 else "/".join(sorted(owned_modes))
+        return HookConfigState("configured", mode=mode_str)
+    if malformed_cmd:
+        return HookConfigState("invalid", detail="malformed SECQUOIA hook command")
+    if foreign_modes:
+        mode_str = next(iter(foreign_modes)) if len(foreign_modes) == 1 else "/".join(sorted(foreign_modes))
+        return HookConfigState(
+            "foreign", mode=mode_str, detail="other checkout or missing runner"
+        )
+    if disabled_modes:
+        mode_str = next(iter(disabled_modes)) if len(disabled_modes) == 1 else "/".join(sorted(disabled_modes))
+        return HookConfigState("disabled", mode=mode_str, detail="enabled: false")
+    return HookConfigState("absent")
+
+
+def installed_hook_mode(
+    path: Path,
+    *,
+    antigravity: bool = False,
+    allowed_scripts: set[Path] | None = None,
+) -> str | None:
+    state = inspect_hook_config(
+        path, antigravity=antigravity, allowed_scripts=allowed_scripts
+    )
+    return state.mode if state.status == "configured" else None
+
+
+def build_base_install_args(
+    args: argparse.Namespace,
+    *,
+    codex_home: Path,
+    custom_home: bool,
+) -> list[str]:
+    preserved: list[str] = []
+    if getattr(args, "copy", False):
+        preserved.append("--copy")
+    if getattr(args, "user_home", None) is not None:
+        preserved.append(f"--user-home={args.user_home}")
+    if getattr(args, "codex_home", None) is not None:
+        preserved.append(f"--codex-home={args.codex_home}")
+    elif custom_home and getattr(args, "user_home", None) is None:
+        preserved.append(f"--codex-home={codex_home}")
+    if getattr(args, "codex_skills_dir", None) is not None:
+        preserved.append(f"--codex-skills-dir={args.codex_skills_dir}")
+    if getattr(args, "antigravity_home", None) is not None:
+        preserved.append(f"--antigravity-home={args.antigravity_home}")
+    if getattr(args, "include_local", False):
+        preserved.append("--include-local")
+    return preserved
+
+
+def _quote_flag(arg: str) -> str:
+    if "=" in arg and arg.startswith("--"):
+        flag, value = arg.split("=", 1)
+        return f"{flag}={shlex.quote(value)}"
+    return shlex.quote(arg)
+
+
+def format_install_command(base_args: Sequence[str], hook_args: Sequence[str]) -> str:
+    parts = [
+        "./install.sh",
+        *(_quote_flag(a) for a in base_args),
+        *(_quote_flag(a) for a in hook_args),
+    ]
+    return " ".join(parts)
+
+
+def _format_inactive_target(name: str, path: Path, state: HookConfigState) -> str:
+    if state.status == "absent":
+        return f"{name} ({path})"
+    return f"{name} ({path}: {state.detail})"
 
 
 def report_hook_parity(
-    codex_home: Path, claude_home: Path, antigravity_home: Path | None
+    codex_home: Path,
+    claude_home: Path,
+    antigravity_home: Path | None,
+    *,
+    base_install_args: Sequence[str] = (),
+    allowed_scripts_by_client: dict[str, set[Path] | None] | None = None,
 ) -> None:
-    targets: list[tuple[str, Path, bool]] = [
-        ("Codex", codex_home / "hooks.json", False),
-        ("Claude", claude_home / "settings.json", False),
+    allowed_map = allowed_scripts_by_client or {}
+    targets: list[tuple[str, str, Path, bool]] = [
+        ("Codex", "--codex-hooks", codex_home / "hooks.json", False),
+        ("Claude", "--claude-hooks", claude_home / "settings.json", False),
     ]
     if antigravity_home is not None:
-        targets.append(("Antigravity", antigravity_home / "hooks.json", True))
-    states = [
-        (name, path, installed_hook_mode(path, antigravity=is_agy))
-        for name, path, is_agy in targets
+        targets.append(
+            ("Antigravity", "--antigravity-hooks", antigravity_home / "hooks.json", True)
+        )
+    inspected = [
+        (
+            name,
+            hook_flag,
+            path,
+            inspect_hook_config(
+                path,
+                antigravity=is_agy,
+                allowed_scripts=allowed_map.get(name),
+            ),
+        )
+        for name, hook_flag, path, is_agy in targets
     ]
-    configured = [(name, mode) for name, _, mode in states if mode is not None]
-    if not configured:
-        return
-    missing = [(name, path) for name, path, mode in states if mode is None]
-    distinct_modes = {mode for _, mode in configured}
-    if not missing and len(distinct_modes) == 1:
-        return
-    configured_text = ", ".join(f"{name} ({mode})" for name, mode in configured)
-    if missing:
-        missing_text = ", ".join(f"{name} ({path})" for name, path in missing)
-        suggested_mode = next(iter(distinct_modes)) if len(distinct_modes) == 1 else "audit"
-        flag_arg = (
-            f"--hooks={suggested_mode}"
-            if suggested_mode in {"audit", "enforce"}
-            else "--hooks"
-        )
+    invalid = [
+        (name, hook_flag, path, state)
+        for name, hook_flag, path, state in inspected
+        if state.status == "invalid"
+    ]
+    for name, _, path, state in invalid:
         print(
-            f"Hook parity note: SECQUOIA encounter hooks are configured for {configured_text}"
-            f" but missing for {missing_text}. Run ./install.sh {flag_arg} to align all active clients."
+            f"Hook parity warning: invalid hook configuration for {name}"
+            f" ({path}: {state.detail}). Repair or back up that file before installing hooks."
         )
-    elif len(distinct_modes) > 1:
+
+    configured = [
+        (name, hook_flag, path, state)
+        for name, hook_flag, path, state in inspected
+        if state.status == "configured"
+    ]
+    inactive = [
+        (name, hook_flag, path, state)
+        for name, hook_flag, path, state in inspected
+        if state.status in {"absent", "disabled", "foreign"}
+    ]
+    if not configured:
+        stale = [
+            (name, hook_flag, path, state)
+            for name, hook_flag, path, state in inactive
+            if state.status == "foreign"
+        ]
+        if stale:
+            stale_text = ", ".join(
+                _format_inactive_target(name, path, state)
+                for name, _, path, state in stale
+            )
+            stale_modes = {
+                state.mode for _, _, _, state in stale if state.mode in {"audit", "enforce"}
+            }
+            mode = next(iter(stale_modes)) if len(stale_modes) == 1 else "audit"
+            hook_flags = (
+                [f"{flag}={mode}" for _, flag, _, _ in stale]
+                if invalid
+                else [f"--hooks={mode}"]
+            )
+            cmd = format_install_command(base_install_args, hook_flags)
+            print(
+                f"Hook parity note: SECQUOIA encounter hooks in {stale_text}"
+                f" point to another checkout or missing runner. Run {cmd} to refresh them."
+            )
+        return
+
+    distinct_modes = {state.mode for _, _, _, state in configured if state.mode is not None}
+    single_clean_mode = (
+        next(iter(distinct_modes))
+        if len(distinct_modes) == 1 and next(iter(distinct_modes)) in {"audit", "enforce"}
+        else None
+    )
+    configured_text = ", ".join(
+        f"{name} ({state.mode})" for name, _, _, state in configured
+    )
+
+    if not inactive and not invalid:
+        if single_clean_mode is not None:
+            return
+        audit_cmd = format_install_command(base_install_args, ["--hooks=audit"])
+        enforce_cmd = format_install_command(base_install_args, ["--hooks=enforce"])
         print(
             f"Hook parity note: SECQUOIA encounter hooks use mixed modes across clients: {configured_text}."
+            f" Run {audit_cmd} or {enforce_cmd} if you want one mode across all active clients."
+        )
+        return
+
+    if inactive:
+        inactive_text = ", ".join(
+            _format_inactive_target(name, path, state)
+            for name, _, path, state in inactive
+        )
+        if single_clean_mode is not None and not invalid:
+            cmd = format_install_command(
+                base_install_args, [f"--hooks={single_clean_mode}"]
+            )
+            print(
+                f"Hook parity note: SECQUOIA encounter hooks are configured for {configured_text}"
+                f" but missing or inactive for {inactive_text}. Run {cmd} to align all active clients."
+            )
+        elif single_clean_mode is not None:
+            per_client = [
+                f"{hook_flag}={single_clean_mode}" for _, hook_flag, _, _ in inactive
+            ]
+            cmd = format_install_command(base_install_args, per_client)
+            print(
+                f"Hook parity note: SECQUOIA encounter hooks are configured for {configured_text}"
+                f" but missing or inactive for {inactive_text}. Run {cmd} to configure valid targets"
+                f" without touching the invalid file(s) above."
+            )
+        else:
+            per_client = [f"{hook_flag}=audit" for _, hook_flag, _, _ in inactive]
+            preserve_cmd = format_install_command(base_install_args, per_client)
+            print(
+                f"Hook parity note: SECQUOIA encounter hooks use mixed modes for {configured_text}"
+                f" and are missing or inactive for {inactive_text}. Run {preserve_cmd} to configure"
+                f" the remaining client(s) in audit mode without changing existing modes"
+                f" (or pass --hooks=audit / --hooks=enforce to set one mode across all active clients)."
+            )
+    elif invalid:
+        invalid_names = ", ".join(name for name, _, _, _ in invalid)
+        hook_args = (
+            [f"--hooks={single_clean_mode}"]
+            if single_clean_mode is not None
+            else [f"{hook_flag}=audit" for _, hook_flag, _, _ in invalid]
+        )
+        cmd = format_install_command(base_install_args, hook_args)
+        print(
+            f"Hook parity note: SECQUOIA encounter hooks are configured for {configured_text};"
+            f" after fixing the invalid configuration for {invalid_names}, run {cmd}."
         )
 
 
@@ -581,10 +831,28 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     "In Codex, open /hooks to review and trust the installed hook definition."
                 )
+            source_script = repo / "skills/apply-conversation-lessons/scripts/encounter_ledger.py"
+            allowed_scripts_by_client: dict[str, set[Path] | None] | None = None
+            if source_script.is_file():
+                allowed_scripts_by_client = {
+                    "Codex": owned_hook_scripts(
+                        repo,
+                        [selected, codex_home / "skills", user_home / ".agents/skills"],
+                    ),
+                    "Claude": owned_hook_scripts(repo, [claude_home / "skills"]),
+                }
+                if include_antigravity:
+                    allowed_scripts_by_client["Antigravity"] = owned_hook_scripts(
+                        repo, [antigravity_skills] if antigravity_skills else []
+                    )
             report_hook_parity(
                 codex_home,
                 claude_home,
                 antigravity_home if include_antigravity else None,
+                base_install_args=build_base_install_args(
+                    args, codex_home=codex_home, custom_home=custom_home
+                ),
+                allowed_scripts_by_client=allowed_scripts_by_client,
             )
         else:
             selected = args.codex_skills_dir or user_home / ".agents" / "skills"
